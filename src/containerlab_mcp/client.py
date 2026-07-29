@@ -87,11 +87,26 @@ class ContainerlabClient:
     def version(self) -> Any:
         return self.request("GET", "/api/v1/version")
 
+    def version_check(self) -> Any:
+        return self.request("GET", "/api/v1/version/check")
+
     def list_labs(self) -> Any:
         return self.request("GET", "/api/v1/labs")
 
     def inspect_lab(self, lab_name: str) -> list[dict[str, Any]]:
         return self.request("GET", f"/api/v1/labs/{lab_name}")
+
+    def list_lab_interfaces(
+        self,
+        lab_name: str,
+        node_name: str | None = None,
+    ) -> Any:
+        params = {"node": node_name} if node_name else None
+        return self.request(
+            "GET",
+            f"/api/v1/labs/{lab_name}/interfaces",
+            params=params,
+        )
 
     def get_topology_yaml(self, lab_name: str) -> str:
         return self.request("GET", f"/api/v1/labs/{lab_name}/topology/yaml")
@@ -101,6 +116,13 @@ class ContainerlabClient:
         return self.request(
             "GET",
             f"/api/v1/labs/{lab_name}/nodes/{container_name}/logs",
+        )
+
+    def get_node_browser_ports(self, lab_name: str, node_name: str) -> Any:
+        container_name = self.resolve_container_name(lab_name, node_name)
+        return self.request(
+            "GET",
+            f"/api/v1/labs/{lab_name}/nodes/{container_name}/browser-ports",
         )
 
     def start_lab(self, lab_name: str, include_logs: bool = True) -> Any:
@@ -116,6 +138,21 @@ class ContainerlabClient:
             f"/api/v1/labs/{lab_name}/stop",
             params={"includeLogs": include_logs},
         )
+
+    def start_node(self, lab_name: str, node_name: str) -> Any:
+        return self._node_action(lab_name, node_name, "start")
+
+    def stop_node(self, lab_name: str, node_name: str) -> Any:
+        return self._node_action(lab_name, node_name, "stop")
+
+    def restart_node(self, lab_name: str, node_name: str) -> Any:
+        return self._node_action(lab_name, node_name, "restart")
+
+    def pause_node(self, lab_name: str, node_name: str) -> Any:
+        return self._node_action(lab_name, node_name, "pause")
+
+    def unpause_node(self, lab_name: str, node_name: str) -> Any:
+        return self._node_action(lab_name, node_name, "unpause")
 
     def deploy_on_disk_lab(
         self,
@@ -161,6 +198,139 @@ class ContainerlabClient:
             "includeLogs": include_logs,
         }
         return self.request("DELETE", f"/api/v1/labs/{lab_name}", params=params)
+
+    def list_images(self) -> Any:
+        return self.request("GET", "/api/v1/images")
+
+    def pull_image(self, image: str) -> Any:
+        return self.request(
+            "POST",
+            "/api/v1/images/pull",
+            json={"image": image},
+        )
+
+    def delete_image(self, reference: str, force: bool = False) -> Any:
+        return self.request(
+            "DELETE",
+            "/api/v1/images",
+            params={"reference": reference, "force": force},
+        )
+
+    def generate_drawio(
+        self,
+        lab_name: str,
+        layout: str | None = None,
+        theme: str | None = None,
+    ) -> Any:
+        payload = {
+            key: value
+            for key, value in {"layout": layout, "theme": theme}.items()
+            if value is not None
+        }
+        return self.request(
+            "POST",
+            f"/api/v1/labs/{lab_name}/graph/drawio",
+            json=payload,
+        )
+
+    def request_ssh_access(
+        self,
+        lab_name: str,
+        node_name: str,
+        duration: str | None = None,
+        ssh_username: str | None = None,
+    ) -> Any:
+        container_name = self.resolve_container_name(lab_name, node_name)
+        payload = {
+            key: value
+            for key, value in {
+                "duration": duration,
+                "sshUsername": ssh_username,
+            }.items()
+            if value is not None
+        }
+        return self.request(
+            "POST",
+            f"/api/v1/labs/{lab_name}/nodes/{container_name}/ssh",
+            json=payload,
+        )
+
+    def list_ssh_sessions(self, all_sessions: bool = False) -> Any:
+        return self.request(
+            "GET",
+            "/api/v1/ssh/sessions",
+            params={"all": all_sessions},
+        )
+
+    def terminate_ssh_session(self, port: int) -> Any:
+        return self.request("DELETE", f"/api/v1/ssh/sessions/{port}")
+
+    def create_terminal_session(
+        self,
+        lab_name: str,
+        node_name: str,
+        protocol: str,
+        rows: int = 24,
+        cols: int = 80,
+        ssh_username: str | None = None,
+        telnet_port: int | None = None,
+    ) -> Any:
+        container_name = self.resolve_container_name(lab_name, node_name)
+        payload: dict[str, Any] = {
+            "protocol": protocol,
+            "rows": rows,
+            "cols": cols,
+        }
+        if ssh_username is not None:
+            payload["sshUsername"] = ssh_username
+        if telnet_port is not None:
+            payload["telnetPort"] = telnet_port
+        return self.request(
+            "POST",
+            f"/api/v1/labs/{lab_name}/nodes/{container_name}/terminal-sessions",
+            json=payload,
+        )
+
+    def get_terminal_session(self, session_id: str) -> Any:
+        return self.request("GET", f"/api/v1/terminal-sessions/{session_id}")
+
+    def terminate_terminal_session(self, session_id: str) -> Any:
+        return self.request("DELETE", f"/api/v1/terminal-sessions/{session_id}")
+
+    def create_vxlan(
+        self,
+        link: str,
+        remote: str,
+        vni: int = 10,
+        port: int = 14789,
+        mtu: int | None = None,
+        dev: str | None = None,
+    ) -> Any:
+        payload: dict[str, Any] = {
+            "link": link,
+            "remote": remote,
+            "id": vni,
+            "port": port,
+        }
+        if mtu is not None:
+            payload["mtu"] = mtu
+        if dev is not None:
+            payload["dev"] = dev
+        return self.request("POST", "/api/v1/tools/vxlan", json=payload)
+
+    def delete_vxlan(self, prefix: str = "vx-") -> Any:
+        return self.request(
+            "DELETE",
+            "/api/v1/tools/vxlan",
+            params={"prefix": prefix},
+        )
+
+    def _node_action(self, lab_name: str, node_name: str, action: str) -> Any:
+        container_name = self.resolve_container_name(lab_name, node_name)
+        return self.request(
+            "POST",
+            f"/api/v1/labs/{lab_name}/nodes/{container_name}/{action}",
+        )
 
     def resolve_container_name(self, lab_name: str, node_name: str) -> str:
         if node_name.startswith("clab-"):
