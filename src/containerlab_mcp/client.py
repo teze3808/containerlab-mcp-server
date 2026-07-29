@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json as json_module
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -50,24 +52,33 @@ class ContainerlabClient:
         *,
         params: dict[str, Any] | None = None,
         json: Any | None = None,
+        content: str | bytes | None = None,
+        headers: dict[str, str] | None = None,
         retry_auth: bool = True,
     ) -> Any:
         token = self.login()
+        request_headers = {
+            **(headers or {}),
+            "Authorization": f"Bearer {token}",
+        }
         response = self._client.request(
             method,
             path,
             params=params,
             json=json,
-            headers={"Authorization": f"Bearer {token}"},
+            content=content,
+            headers=request_headers,
         )
         if response.status_code == 401 and retry_auth:
             token = self.login(force=True)
+            request_headers["Authorization"] = f"Bearer {token}"
             response = self._client.request(
                 method,
                 path,
                 params=params,
                 json=json,
-                headers={"Authorization": f"Bearer {token}"},
+                content=content,
+                headers=request_headers,
             )
 
         self._raise_for_status(response)
@@ -123,6 +134,82 @@ class ContainerlabClient:
         return self.request(
             "GET",
             f"/api/v1/labs/{lab_name}/nodes/{container_name}/browser-ports",
+        )
+
+    def execute_lab_command(
+        self,
+        lab_name: str,
+        command: str,
+        node_filter: str | None = None,
+    ) -> Any:
+        params = (
+            {
+                "nodeFilter": self.resolve_container_name(
+                    lab_name,
+                    node_filter,
+                )
+            }
+            if node_filter
+            else None
+        )
+        return self.request(
+            "POST",
+            f"/api/v1/labs/{lab_name}/exec",
+            params=params,
+            json={"command": command},
+        )
+
+    def execute_node_command(
+        self,
+        lab_name: str,
+        node_name: str,
+        command: str,
+    ) -> Any:
+        return self.execute_lab_command(
+            lab_name,
+            command,
+            node_filter=self.resolve_container_name(lab_name, node_name),
+        )
+
+    def validate_node_command(
+        self,
+        lab_name: str,
+        node_name: str,
+        command: str,
+        expected_text: str | None = None,
+    ) -> dict[str, Any]:
+        result = self.execute_node_command(lab_name, node_name, command)
+        entries = [
+            entry
+            for node_entries in result.values()
+            for entry in node_entries
+            if isinstance(entry, dict)
+        ] if isinstance(result, dict) else []
+        return_codes = [entry.get("return-code") for entry in entries]
+        stdout = "\n".join(str(entry.get("stdout", "")) for entry in entries)
+        passed = bool(entries) and all(code == 0 for code in return_codes)
+        if expected_text is not None:
+            passed = passed and expected_text in stdout
+        return {
+            "passed": passed,
+            "expectedText": expected_text,
+            "result": result,
+        }
+
+    def save_lab_config(
+        self,
+        lab_name: str,
+        node_name: str | None = None,
+    ) -> Any:
+        params = (
+            {"nodeFilter": self.resolve_container_name(lab_name, node_name)}
+            if node_name
+            else None
+        )
+        return self.request(
+            "POST",
+            f"/api/v1/labs/{lab_name}/save",
+            params=params,
         )
 
     def start_lab(self, lab_name: str, include_logs: bool = True) -> Any:
@@ -233,6 +320,67 @@ class ContainerlabClient:
             json=payload,
         )
 
+    def get_edgeshark_status(self) -> Any:
+        return self.request("GET", "/api/v1/tools/edgeshark/status")
+
+    def install_edgeshark(self) -> Any:
+        return self.request("POST", "/api/v1/tools/edgeshark/install")
+
+    def uninstall_edgeshark(self) -> Any:
+        return self.request("POST", "/api/v1/tools/edgeshark/uninstall")
+
+    def build_packetflix_capture(
+        self,
+        lab_name: str,
+        targets: list[dict[str, str]],
+        remote_hostname: str | None = None,
+    ) -> Any:
+        payload: dict[str, Any] = {
+            "targets": self._resolve_capture_targets(lab_name, targets)
+        }
+        if remote_hostname:
+            payload["remoteHostname"] = remote_hostname
+        return self.request(
+            "POST",
+            f"/api/v1/labs/{lab_name}/capture/packetflix",
+            json=payload,
+        )
+
+    def create_wireshark_capture_sessions(
+        self,
+        lab_name: str,
+        targets: list[dict[str, str]],
+        theme: str | None = None,
+    ) -> Any:
+        payload: dict[str, Any] = {
+            "targets": self._resolve_capture_targets(lab_name, targets)
+        }
+        if theme:
+            payload["theme"] = theme
+        return self.request(
+            "POST",
+            f"/api/v1/labs/{lab_name}/capture/wireshark-vnc-sessions",
+            json=payload,
+        )
+
+    def get_capture_session_ready(self, session_id: str) -> Any:
+        return self.request(
+            "GET",
+            f"/api/v1/capture/wireshark-vnc-sessions/{quote(session_id, safe='')}/ready",
+        )
+
+    def terminate_capture_session(self, session_id: str) -> Any:
+        return self.request(
+            "DELETE",
+            f"/api/v1/capture/wireshark-vnc-sessions/{quote(session_id, safe='')}",
+        )
+
+    def terminate_all_capture_sessions(self) -> Any:
+        return self.request(
+            "DELETE",
+            "/api/v1/capture/wireshark-vnc-sessions",
+        )
+
     def request_ssh_access(
         self,
         lab_name: str,
@@ -324,6 +472,268 @@ class ContainerlabClient:
             "/api/v1/tools/vxlan",
             params={"prefix": prefix},
         )
+
+    def set_link_impairment(
+        self,
+        lab_name: str,
+        node_name: str,
+        interface: str,
+        delay: str | None = None,
+        jitter: str | None = None,
+        loss: float = 0.0,
+        rate: int = 0,
+        corruption: float = 0.0,
+    ) -> Any:
+        payload: dict[str, Any] = {
+            "containerName": self.resolve_container_name(lab_name, node_name),
+            "interface": interface,
+            "loss": loss,
+            "rate": rate,
+            "corruption": corruption,
+        }
+        if delay:
+            payload["delay"] = delay
+        if jitter:
+            payload["jitter"] = jitter
+        return self.request("POST", "/api/v1/tools/netem/set", json=payload)
+
+    def show_link_impairments(self, lab_name: str, node_name: str) -> Any:
+        return self.request(
+            "GET",
+            "/api/v1/tools/netem/show",
+            params={
+                "containerName": self.resolve_container_name(lab_name, node_name)
+            },
+        )
+
+    def reset_link_impairment(
+        self,
+        lab_name: str,
+        node_name: str,
+        interface: str,
+    ) -> Any:
+        return self.request(
+            "POST",
+            "/api/v1/tools/netem/reset",
+            json={
+                "containerName": self.resolve_container_name(lab_name, node_name),
+                "interface": interface,
+            },
+        )
+
+    def list_topology_files(self) -> Any:
+        return self.request("GET", "/api/v1/labs/topology/files")
+
+    def update_topology_yaml(self, lab_name: str, content: str) -> Any:
+        return self._put_text(
+            f"/api/v1/labs/{lab_name}/topology/yaml",
+            content,
+        )
+
+    def get_topology_annotations(self, lab_name: str) -> str:
+        return self.request(
+            "GET",
+            f"/api/v1/labs/{lab_name}/topology/annotations",
+        )
+
+    def update_topology_annotations(self, lab_name: str, content: str) -> Any:
+        return self._put_text(
+            f"/api/v1/labs/{lab_name}/topology/annotations",
+            content,
+        )
+
+    def get_topology_file(self, lab_name: str, path: str) -> str:
+        return self.request(
+            "GET",
+            f"/api/v1/labs/{lab_name}/topology/file",
+            params={"path": path},
+        )
+
+    def put_topology_file(self, lab_name: str, path: str, content: str) -> Any:
+        return self._put_text(
+            f"/api/v1/labs/{lab_name}/topology/file",
+            content,
+            params={"path": path},
+        )
+
+    def delete_topology_file(self, lab_name: str, path: str) -> Any:
+        return self.request(
+            "DELETE",
+            f"/api/v1/labs/{lab_name}/topology/file",
+            params={"path": path},
+        )
+
+    def rename_topology_file(
+        self,
+        lab_name: str,
+        old_path: str,
+        new_path: str,
+    ) -> Any:
+        return self.request(
+            "POST",
+            f"/api/v1/labs/{lab_name}/topology/file/rename",
+            json={"oldPath": old_path, "newPath": new_path},
+        )
+
+    def collect_events(
+        self,
+        duration_seconds: float = 10.0,
+        max_events: int = 100,
+        initial_state: bool = True,
+        interface_stats: bool = False,
+        interface_stats_interval: str = "10s",
+    ) -> list[dict[str, Any]]:
+        if duration_seconds <= 0 or duration_seconds > 60:
+            raise ValueError("duration_seconds must be between 0 and 60")
+        if max_events < 1 or max_events > 1000:
+            raise ValueError("max_events must be between 1 and 1000")
+
+        token = self.login()
+        params: dict[str, Any] = {
+            "initialState": initial_state,
+            "interfaceStats": interface_stats,
+        }
+        if interface_stats:
+            params["interfaceStatsInterval"] = interface_stats_interval
+
+        timeout = httpx.Timeout(
+            connect=self.settings.timeout,
+            read=duration_seconds,
+            write=self.settings.timeout,
+            pool=self.settings.timeout,
+        )
+        deadline = time.monotonic() + duration_seconds
+        events: list[dict[str, Any]] = []
+        try:
+            with self._client.stream(
+                "GET",
+                "/api/v1/events",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=timeout,
+            ) as response:
+                self._raise_for_status(response)
+                for line in response.iter_lines():
+                    if time.monotonic() >= deadline or len(events) >= max_events:
+                        break
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json_module.loads(line)
+                    except json_module.JSONDecodeError:
+                        continue
+                    if isinstance(event, dict) and event:
+                        events.append(event)
+        except httpx.ReadTimeout:
+            pass
+        return events
+
+    def generate_clos_topology(
+        self,
+        name: str,
+        tiers: list[dict[str, Any]],
+        images: dict[str, str],
+        *,
+        default_kind: str | None = None,
+        deploy: bool = False,
+        node_prefix: str | None = None,
+        group_prefix: str | None = None,
+        management_network: str | None = None,
+        ipv4_subnet: str | None = None,
+        ipv6_subnet: str | None = None,
+        licenses: dict[str, str] | None = None,
+        max_workers: int | None = None,
+        output_file: str | None = None,
+    ) -> Any:
+        payload: dict[str, Any] = {
+            "name": name,
+            "tiers": tiers,
+            "images": images,
+            "deploy": deploy,
+        }
+        optional = {
+            "defaultKind": default_kind,
+            "nodePrefix": node_prefix,
+            "groupPrefix": group_prefix,
+            "managementNetwork": management_network,
+            "ipv4Subnet": ipv4_subnet,
+            "ipv6Subnet": ipv6_subnet,
+            "licenses": licenses,
+            "maxWorkers": max_workers,
+            "outputFile": output_file,
+        }
+        payload.update({key: value for key, value in optional.items() if value is not None})
+        return self.request("POST", "/api/v1/generate", json=payload)
+
+    def list_custom_node_templates(self) -> Any:
+        return self.request("GET", "/api/v1/ui/custom-nodes")
+
+    def save_custom_node_template(self, template: dict[str, Any]) -> Any:
+        return self.request("POST", "/api/v1/ui/custom-nodes", json=template)
+
+    def replace_custom_node_templates(
+        self,
+        templates: list[dict[str, Any]],
+    ) -> Any:
+        return self.request(
+            "PUT",
+            "/api/v1/ui/custom-nodes",
+            json={"customNodes": templates},
+        )
+
+    def set_default_custom_node_template(self, name: str) -> Any:
+        return self.request(
+            "POST",
+            "/api/v1/ui/custom-nodes/default",
+            json={"name": name},
+        )
+
+    def delete_custom_node_template(self, name: str) -> Any:
+        return self.request(
+            "DELETE",
+            f"/api/v1/ui/custom-nodes/{quote(name, safe='')}",
+        )
+
+    def _put_text(
+        self,
+        path: str,
+        content: str,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        return self.request(
+            "PUT",
+            path,
+            params=params,
+            content=content,
+            headers={"Content-Type": "text/plain; charset=utf-8"},
+        )
+
+    def _resolve_capture_targets(
+        self,
+        lab_name: str,
+        targets: list[dict[str, str]],
+    ) -> list[dict[str, str]]:
+        resolved = []
+        for target in targets:
+            node_name = target.get("nodeName") or target.get("containerName")
+            interface_name = target.get("interfaceName")
+            if not node_name or not interface_name:
+                raise ValueError(
+                    "Each capture target requires nodeName (or containerName) "
+                    "and interfaceName"
+                )
+            resolved.append(
+                {
+                    "containerName": self.resolve_container_name(
+                        lab_name,
+                        node_name,
+                    ),
+                    "interfaceName": interface_name,
+                }
+            )
+        if not resolved:
+            raise ValueError("At least one capture target is required")
+        return resolved
 
     def _node_action(self, lab_name: str, node_name: str, action: str) -> Any:
         container_name = self.resolve_container_name(lab_name, node_name)

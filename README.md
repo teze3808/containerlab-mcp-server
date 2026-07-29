@@ -21,9 +21,10 @@ stop, and destroy labs without exposing unrestricted shell access.
 ## Overview
 
 `containerlab-mcp-server` wraps the official Containerlab HTTPS API and exposes
-33 focused MCP tools for lab lifecycle, operational visibility, runtime images,
-remote access, and multi-host network stitching. Once configured, an AI
-assistant can answer requests such as:
+64 focused MCP tools for lab lifecycle, command execution, configuration
+artifacts, packet capture, network impairments, topology generation, remote
+access, and multi-host network stitching. Once configured, an AI assistant can
+answer requests such as:
 
 - "List every Containerlab lab and show node health."
 - "Deploy two AOS-CX switches connected on `eth1`."
@@ -58,13 +59,21 @@ generic remote shell.
 - Implemented: interface inspection, browser ports, and draw.io generation.
 - Implemented: temporary SSH access and constrained terminal session lifecycle.
 - Implemented: superuser-gated VXLAN creation and removal for multi-host links.
+- Implemented: native lab/node command execution, validation, and config save.
+- Implemented: EdgeShark Packetflix and Wireshark capture session management.
+- Implemented: netem delay, jitter, loss, rate, and corruption controls.
+- Implemented: topology YAML, annotations, and scoped lab file management.
+- Implemented: bounded event collection and native CLOS topology generation.
+- Implemented: TopoViewer custom node template management.
 - Implemented: a helper that generates a two-switch AOS-CX topology object.
 - Not implemented: arbitrary host command execution.
-- Not implemented: direct device configuration or command automation.
+- Not implemented: vendor-aware CLI transports or configuration translation.
+- Not implemented: unbounded event or interactive terminal streaming over MCP.
 - Not implemented: image conversion or vrnetlab Docker image builds.
 
-Destructive actions such as `destroy_lab`, `delete_image`, and `delete_vxlan`
-should only be called after explicit operator approval.
+Destructive or state-changing actions such as `destroy_lab`, `delete_image`,
+`execute_node_command`, `set_link_impairment`, file writes/deletes, and template
+replacement should only be called after explicit operator approval.
 
 ## APIs Used
 
@@ -87,6 +96,8 @@ DELETE /api/v1/labs/{lab_name}
 GET    /api/v1/labs/{lab_name}/topology/yaml
 GET    /api/v1/labs/{lab_name}/nodes/{container_name}/logs
 GET    /api/v1/labs/{lab_name}/nodes/{container_name}/browser-ports
+POST   /api/v1/labs/{lab_name}/exec
+POST   /api/v1/labs/{lab_name}/save
 POST   /api/v1/labs/{lab_name}/nodes/{container_name}/start
 POST   /api/v1/labs/{lab_name}/nodes/{container_name}/stop
 POST   /api/v1/labs/{lab_name}/nodes/{container_name}/restart
@@ -104,6 +115,32 @@ GET    /api/v1/terminal-sessions/{session_id}
 DELETE /api/v1/terminal-sessions/{session_id}
 POST   /api/v1/tools/vxlan
 DELETE /api/v1/tools/vxlan
+GET    /api/v1/tools/edgeshark/status
+POST   /api/v1/tools/edgeshark/install
+POST   /api/v1/tools/edgeshark/uninstall
+POST   /api/v1/labs/{lab_name}/capture/packetflix
+POST   /api/v1/labs/{lab_name}/capture/wireshark-vnc-sessions
+GET    /api/v1/capture/wireshark-vnc-sessions/{session_id}/ready
+DELETE /api/v1/capture/wireshark-vnc-sessions/{session_id}
+DELETE /api/v1/capture/wireshark-vnc-sessions
+POST   /api/v1/tools/netem/set
+GET    /api/v1/tools/netem/show
+POST   /api/v1/tools/netem/reset
+GET    /api/v1/labs/topology/files
+PUT    /api/v1/labs/{lab_name}/topology/yaml
+GET    /api/v1/labs/{lab_name}/topology/annotations
+PUT    /api/v1/labs/{lab_name}/topology/annotations
+GET    /api/v1/labs/{lab_name}/topology/file
+PUT    /api/v1/labs/{lab_name}/topology/file
+DELETE /api/v1/labs/{lab_name}/topology/file
+POST   /api/v1/labs/{lab_name}/topology/file/rename
+GET    /api/v1/events
+POST   /api/v1/generate
+GET    /api/v1/ui/custom-nodes
+POST   /api/v1/ui/custom-nodes
+PUT    /api/v1/ui/custom-nodes
+POST   /api/v1/ui/custom-nodes/default
+DELETE /api/v1/ui/custom-nodes/{name}
 ```
 
 ## Tool Categories
@@ -152,6 +189,19 @@ for a one-node topology with no links or position data.
 | `pause_node` | Pause one running node |
 | `unpause_node` | Resume one paused node |
 
+### Commands and Configuration
+
+| Tool | Description |
+| --- | --- |
+| `execute_lab_command` | Execute a native container command on all or filtered nodes |
+| `execute_node_command` | Execute a native container command on one resolved node |
+| `validate_node_command` | Check exit status and optional expected output |
+| `save_lab_config` | Save running configuration for supported node kinds |
+
+The native exec API runs commands in the node container. It does not translate
+vendor configuration intent into Aruba CX or Junos CLI syntax. The caller must
+provide the command appropriate to that image and confirm mutating commands.
+
 ### Runtime Images
 
 | Tool | Description |
@@ -162,6 +212,64 @@ for a one-node topology with no links or position data.
 
 Image pull uses the runtime's existing registry authentication. This project
 does not collect registry credentials or build vrnetlab images.
+
+### Packet Capture
+
+| Tool | Description |
+| --- | --- |
+| `get_edgeshark_status` | Return EdgeShark runtime status |
+| `install_edgeshark` | Install/start EdgeShark as an API superuser |
+| `uninstall_edgeshark` | Remove EdgeShark as an API superuser |
+| `build_packetflix_capture` | Build Packetflix URIs for capture targets |
+| `create_wireshark_capture_sessions` | Create Wireshark/noVNC capture sessions |
+| `get_capture_session_ready` | Check session readiness and URL |
+| `terminate_capture_session` | Terminate one capture session |
+| `terminate_all_capture_sessions` | Terminate all visible capture sessions |
+
+The v0.5.1 API exposes capture through EdgeShark Packetflix and proxied
+Wireshark/noVNC sessions. It does not expose a direct PCAP download operation.
+
+### Link Impairments
+
+| Tool | Description |
+| --- | --- |
+| `set_link_impairment` | Apply delay, jitter, loss, rate, or corruption |
+| `show_link_impairments` | Inspect active netem settings |
+| `reset_link_impairment` | Remove impairment from one interface |
+
+### Topology Documents and Files
+
+| Tool | Description |
+| --- | --- |
+| `list_topology_files` | List editable topology entries |
+| `update_topology_yaml` | Replace a lab topology YAML document |
+| `get_topology_annotations` | Read TopoViewer annotations |
+| `update_topology_annotations` | Replace TopoViewer annotations |
+| `get_topology_file` | Read a scoped lab file |
+| `put_topology_file` | Write a scoped lab file or startup configuration |
+| `put_startup_config` | Write a startup config under `configs/` and return its path |
+| `rename_topology_file` | Rename or move a scoped lab file |
+| `delete_topology_file` | Delete a scoped lab file |
+
+Startup configuration support uses `put_topology_file` to store the config and
+`update_topology_yaml` to reference it from the intended node.
+
+### Events and Generation
+
+| Tool | Description |
+| --- | --- |
+| `collect_events` | Collect up to 60 seconds of native NDJSON events |
+| `generate_clos_topology` | Generate and optionally deploy a native CLOS topology |
+
+### Custom Node Templates
+
+| Tool | Description |
+| --- | --- |
+| `list_custom_node_templates` | List the user's TopoViewer templates |
+| `save_custom_node_template` | Create or update one template |
+| `replace_custom_node_templates` | Replace the full template collection |
+| `set_default_custom_node_template` | Select the default template |
+| `delete_custom_node_template` | Delete one template |
 
 ### Remote Access
 

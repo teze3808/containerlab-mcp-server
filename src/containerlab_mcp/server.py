@@ -119,6 +119,64 @@ def get_node_browser_ports(lab_name: str, node_name: str) -> Any:
 
 
 @mcp.tool()
+def execute_lab_command(
+    lab_name: str,
+    command: str,
+    node_filter: str | None = None,
+) -> Any:
+    """Execute a native container command on all lab nodes or one filtered node."""
+    client = get_client()
+    try:
+        return client.execute_lab_command(
+            lab_name,
+            command,
+            node_filter=node_filter,
+        )
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def execute_node_command(lab_name: str, node_name: str, command: str) -> Any:
+    """Execute a native container command on one node. Confirm mutating commands first."""
+    client = get_client()
+    try:
+        return client.execute_node_command(lab_name, node_name, command)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def validate_node_command(
+    lab_name: str,
+    node_name: str,
+    command: str,
+    expected_text: str | None = None,
+) -> Any:
+    """Run a command and report pass when it exits zero and optionally contains text."""
+    client = get_client()
+    try:
+        return client.validate_node_command(
+            lab_name,
+            node_name,
+            command,
+            expected_text=expected_text,
+        )
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def save_lab_config(lab_name: str, node_name: str | None = None) -> Any:
+    """Save running configurations for all supported nodes or one named node."""
+    client = get_client()
+    try:
+        return client.save_lab_config(lab_name, node_name=node_name)
+    finally:
+        client.close()
+
+
+@mcp.tool()
 def start_lab(lab_name: str, include_logs: bool = True) -> Any:
     """Start all stopped nodes in a deployed lab."""
     client = get_client()
@@ -291,6 +349,102 @@ def generate_drawio(
 
 
 @mcp.tool()
+def get_edgeshark_status() -> Any:
+    """Return EdgeShark packet-capture service status."""
+    client = get_client()
+    try:
+        return client.get_edgeshark_status()
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def install_edgeshark() -> Any:
+    """Install and start EdgeShark. Requires API superuser and explicit approval."""
+    client = get_client()
+    try:
+        return client.install_edgeshark()
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def uninstall_edgeshark() -> Any:
+    """Uninstall EdgeShark. Requires API superuser and explicit approval."""
+    client = get_client()
+    try:
+        return client.uninstall_edgeshark()
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def build_packetflix_capture(
+    lab_name: str,
+    targets: list[dict[str, str]],
+    remote_hostname: str | None = None,
+) -> Any:
+    """Build Packetflix capture URIs for node/interface targets."""
+    client = get_client()
+    try:
+        return client.build_packetflix_capture(
+            lab_name,
+            targets,
+            remote_hostname=remote_hostname,
+        )
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def create_wireshark_capture_sessions(
+    lab_name: str,
+    targets: list[dict[str, str]],
+    theme: str | None = None,
+) -> Any:
+    """Create EdgeShark Wireshark/noVNC sessions for node/interface targets."""
+    client = get_client()
+    try:
+        return client.create_wireshark_capture_sessions(
+            lab_name,
+            targets,
+            theme=theme,
+        )
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def get_capture_session_ready(session_id: str) -> Any:
+    """Return capture-session readiness and its proxied noVNC URL."""
+    client = get_client()
+    try:
+        return client.get_capture_session_ready(session_id)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def terminate_capture_session(session_id: str) -> Any:
+    """Terminate one Wireshark capture session after explicit approval."""
+    client = get_client()
+    try:
+        return client.terminate_capture_session(session_id)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def terminate_all_capture_sessions() -> Any:
+    """Terminate all visible Wireshark capture sessions after explicit approval."""
+    client = get_client()
+    try:
+        return client.terminate_all_capture_sessions()
+    finally:
+        client.close()
+
+
+@mcp.tool()
 def request_ssh_access(
     lab_name: str,
     node_name: str,
@@ -406,6 +560,271 @@ def delete_vxlan(prefix: str = "vx-") -> Any:
     client = get_client()
     try:
         return client.delete_vxlan(prefix=prefix)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def set_link_impairment(
+    lab_name: str,
+    node_name: str,
+    interface: str,
+    delay: str | None = None,
+    jitter: str | None = None,
+    loss: float = 0.0,
+    rate: int = 0,
+    corruption: float = 0.0,
+) -> Any:
+    """Set delay, jitter, loss, rate, or corruption after explicit approval."""
+    client = get_client()
+    try:
+        return client.set_link_impairment(
+            lab_name,
+            node_name,
+            interface,
+            delay=delay,
+            jitter=jitter,
+            loss=loss,
+            rate=rate,
+            corruption=corruption,
+        )
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def show_link_impairments(lab_name: str, node_name: str) -> Any:
+    """Show active netem impairments for one node."""
+    client = get_client()
+    try:
+        return client.show_link_impairments(lab_name, node_name)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def reset_link_impairment(
+    lab_name: str,
+    node_name: str,
+    interface: str,
+) -> Any:
+    """Remove netem impairments from an interface after explicit approval."""
+    client = get_client()
+    try:
+        return client.reset_link_impairment(lab_name, node_name, interface)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def list_topology_files() -> Any:
+    """List editable topology files visible to the API user."""
+    client = get_client()
+    try:
+        return client.list_topology_files()
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def update_topology_yaml(lab_name: str, content: str) -> Any:
+    """Replace a lab topology YAML document after explicit approval."""
+    client = get_client()
+    try:
+        return client.update_topology_yaml(lab_name, content)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def get_topology_annotations(lab_name: str) -> str:
+    """Return the TopoViewer annotations JSON for a lab."""
+    client = get_client()
+    try:
+        return client.get_topology_annotations(lab_name)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def update_topology_annotations(lab_name: str, content: str) -> Any:
+    """Replace the TopoViewer annotations JSON after explicit approval."""
+    client = get_client()
+    try:
+        return client.update_topology_annotations(lab_name, content)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def get_topology_file(lab_name: str, path: str) -> str:
+    """Read a scoped file from a lab directory."""
+    client = get_client()
+    try:
+        return client.get_topology_file(lab_name, path)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def put_topology_file(lab_name: str, path: str, content: str) -> Any:
+    """Write a scoped lab file, including startup configs, after approval."""
+    client = get_client()
+    try:
+        return client.put_topology_file(lab_name, path, content)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def put_startup_config(
+    lab_name: str,
+    node_name: str,
+    content: str,
+    path: str | None = None,
+) -> Any:
+    """Write a startup config under configs/ and return its topology-relative path."""
+    config_path = path or f"configs/{node_name}.cfg"
+    client = get_client()
+    try:
+        result = client.put_topology_file(lab_name, config_path, content)
+        return {"path": config_path, "result": result}
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def delete_topology_file(lab_name: str, path: str) -> Any:
+    """Delete a scoped file from a lab directory after explicit approval."""
+    client = get_client()
+    try:
+        return client.delete_topology_file(lab_name, path)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def rename_topology_file(
+    lab_name: str,
+    old_path: str,
+    new_path: str,
+) -> Any:
+    """Rename or move a scoped file inside a lab directory."""
+    client = get_client()
+    try:
+        return client.rename_topology_file(lab_name, old_path, new_path)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def collect_events(
+    duration_seconds: float = 10.0,
+    max_events: int = 100,
+    initial_state: bool = True,
+    interface_stats: bool = False,
+    interface_stats_interval: str = "10s",
+) -> Any:
+    """Collect a bounded snapshot from the native NDJSON event stream."""
+    client = get_client()
+    try:
+        return client.collect_events(
+            duration_seconds=duration_seconds,
+            max_events=max_events,
+            initial_state=initial_state,
+            interface_stats=interface_stats,
+            interface_stats_interval=interface_stats_interval,
+        )
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def generate_clos_topology(
+    name: str,
+    tiers: list[dict[str, Any]],
+    images: dict[str, str],
+    default_kind: str | None = None,
+    deploy: bool = False,
+    node_prefix: str | None = None,
+    group_prefix: str | None = None,
+    management_network: str | None = None,
+    ipv4_subnet: str | None = None,
+    ipv6_subnet: str | None = None,
+    licenses: dict[str, str] | None = None,
+    max_workers: int | None = None,
+    output_file: str | None = None,
+) -> Any:
+    """Generate a native CLOS topology and optionally deploy it."""
+    client = get_client()
+    try:
+        return client.generate_clos_topology(
+            name,
+            tiers,
+            images,
+            default_kind=default_kind,
+            deploy=deploy,
+            node_prefix=node_prefix,
+            group_prefix=group_prefix,
+            management_network=management_network,
+            ipv4_subnet=ipv4_subnet,
+            ipv6_subnet=ipv6_subnet,
+            licenses=licenses,
+            max_workers=max_workers,
+            output_file=output_file,
+        )
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def list_custom_node_templates() -> Any:
+    """List the API user's TopoViewer custom node templates."""
+    client = get_client()
+    try:
+        return client.list_custom_node_templates()
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def save_custom_node_template(template: dict[str, Any]) -> Any:
+    """Create or update one custom node template."""
+    client = get_client()
+    try:
+        return client.save_custom_node_template(template)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def replace_custom_node_templates(
+    templates: list[dict[str, Any]],
+) -> Any:
+    """Replace the complete custom node template collection after approval."""
+    client = get_client()
+    try:
+        return client.replace_custom_node_templates(templates)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def set_default_custom_node_template(name: str) -> Any:
+    """Select the default TopoViewer custom node template."""
+    client = get_client()
+    try:
+        return client.set_default_custom_node_template(name)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def delete_custom_node_template(name: str) -> Any:
+    """Delete one custom node template after explicit approval."""
+    client = get_client()
+    try:
+        return client.delete_custom_node_template(name)
     finally:
         client.close()
 
