@@ -306,6 +306,47 @@ The topology helper defaults to
 `vrnetlab/aruba_arubaos-cx:10.17.1010`. Pass a different image tag when
 required by your environment.
 
+## Topology Diagrams
+
+For Markdown documentation, Mermaid is the recommended default. The diagram
+source remains readable in Git, GitHub renders Mermaid code blocks directly,
+and an MCP client can derive the flowchart from topology YAML returned by
+`get_topology_yaml`.
+
+```mermaid
+flowchart TB
+    s1["CX Spine 1"]
+    s2["CX Spine 2"]
+    l1["EX Leaf 1"]
+    l2["EX Leaf 2"]
+    l3["EX Leaf 3"]
+    l4["EX Leaf 4"]
+
+    s1 --- l1
+    s1 --- l2
+    s1 --- l3
+    s1 --- l4
+    s2 --- l1
+    s2 --- l2
+    s2 --- l3
+    s2 --- l4
+```
+
+| Format | Recommended use | Repository behavior |
+| --- | --- | --- |
+| Mermaid | README files and automatically generated topology views | Text source renders directly on GitHub |
+| Draw.io XML | Detailed manual editing and rearrangement | Generated for deployed labs with `generate_drawio` |
+| SVG | Polished documentation and presentations | Store an exported image alongside the Markdown |
+| PNG | Maximum viewer compatibility | Store an exported image alongside the Markdown |
+| Graphviz, PlantUML, or D2 | Specialized automated layouts | Render externally before embedding |
+| ASCII | Terminals and plain-text output | Works everywhere but carries limited detail |
+
+Mermaid rendering is currently performed by the MCP client from topology data;
+it is not a separate native `clab-api-server` endpoint. Native Draw.io
+generation requires a deployed topology and depends on `clab-io-draw`. The
+upstream renderer may fail for a one-node topology with no links or position
+data.
+
 ## Example Questions
 
 Try these in an MCP-capable AI client:
@@ -319,6 +360,7 @@ Show every interface in mixed-cx-ex.
 Show the topology YAML for mixed-cx-ex.
 Get the last logs from node ex1 in mixed-cx-ex.
 Generate a horizontal draw.io diagram for mixed-cx-ex.
+Read the fabric1 topology YAML and show it as a Mermaid diagram.
 Restart only node ex1 and wait until it becomes healthy.
 List all runtime images on the lab host.
 Pull ghcr.io/srl-labs/alpine:latest.
