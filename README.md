@@ -35,41 +35,42 @@ answer requests such as:
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    A["MCP client<br/>Codex, Claude, or VS Code"] -->|stdio| B["containerlab-mcp-server"]
-    B -->|HTTPS + bearer token| C["Containerlab API Server"]
-    C --> D["Containerlab"]
-    D --> E["Docker and lab nodes"]
-```
+![Animated containerlab-mcp-server architecture](docs/architecture.gif)
 
 The MCP server runs locally with the AI client. It authenticates to
 `clab-api-server`, caches the returned bearer token for up to one hour, and
 re-authenticates once when an API request returns HTTP 401.
 
-## Operational Scope
+## Implemented API Server Features
 
-This project intentionally exposes focused Containerlab operations instead of a
-generic remote shell.
+The implementation follows the feature areas published by
+[`srl-labs/clab-api-server`](https://github.com/srl-labs/clab-api-server).
+These API server capabilities are currently exposed through MCP:
 
-- Implemented: API health, metrics, version, lab inventory, topology, and logs.
-- Implemented: deploy, start, stop, and destroy lab lifecycle operations.
-- Implemented: per-node start, stop, restart, pause, and unpause operations.
-- Implemented: runtime image listing, pulling, and explicit deletion.
-- Implemented: interface inspection, browser ports, and draw.io generation.
-- Implemented: temporary SSH access and constrained terminal session lifecycle.
-- Implemented: superuser-gated VXLAN creation and removal for multi-host links.
-- Implemented: native lab/node command execution, validation, and config save.
-- Implemented: EdgeShark Packetflix and Wireshark capture session management.
-- Implemented: netem delay, jitter, loss, rate, and corruption controls.
-- Implemented: topology YAML, annotations, and scoped lab file management.
-- Implemented: bounded event collection and native CLOS topology generation.
-- Implemented: TopoViewer custom node template management.
-- Implemented: a helper that generates a two-switch AOS-CX topology object.
-- Not implemented: arbitrary host command execution.
-- Not implemented: vendor-aware CLI transports or configuration translation.
-- Not implemented: unbounded event or interactive terminal streaming over MCP.
-- Not implemented: image conversion or vrnetlab Docker image builds.
+- **Lab Management:** list, inspect, deploy, start, stop, and destroy labs.
+- **Node Operations:** start, stop, restart, pause, unpause, execute commands,
+  validate command output, and save configurations.
+- **SSH Access:** request temporary SSH access, list sessions, and terminate
+  sessions.
+- **Terminal Sessions:** create, inspect, and terminate constrained SSH,
+  shell, and telnet sessions.
+- **Topology Tools:** generate CLOS topologies, generate Draw.io XML, and build
+  a two-switch AOS-CX topology object.
+- **Network Tools:** inspect interfaces, apply or reset netem impairments, and
+  create or delete multi-host VXLAN tunnels.
+- **Packet Capture:** inspect or manage EdgeShark and create Packetflix or
+  Wireshark/noVNC capture sessions.
+- **Health Monitoring:** check API health, host metrics, Containerlab version,
+  and available updates.
+- **Logs and Events:** read node logs and collect bounded runtime event
+  snapshots.
+- **Runtime Images:** list, pull, and delete container images.
+- **User Context and Multitenancy:** authenticate as a Linux API user and
+  preserve server-side ownership and lab visibility boundaries.
+- **Standalone Topology Editing:** list and update topology YAML, annotations,
+  startup configurations, and scoped lab files.
+- **Custom Node Templates:** list, save, replace, select, and delete TopoViewer
+  templates.
 
 Destructive or state-changing actions such as `destroy_lab`, `delete_image`,
 `execute_node_command`, `set_link_impairment`, file writes/deletes, and template
@@ -306,47 +307,6 @@ The topology helper defaults to
 `vrnetlab/aruba_arubaos-cx:10.17.1010`. Pass a different image tag when
 required by your environment.
 
-## Topology Diagrams
-
-For Markdown documentation, Mermaid is the recommended default. The diagram
-source remains readable in Git, GitHub renders Mermaid code blocks directly,
-and an MCP client can derive the flowchart from topology YAML returned by
-`get_topology_yaml`.
-
-```mermaid
-flowchart TB
-    s1["CX Spine 1"]
-    s2["CX Spine 2"]
-    l1["EX Leaf 1"]
-    l2["EX Leaf 2"]
-    l3["EX Leaf 3"]
-    l4["EX Leaf 4"]
-
-    s1 --- l1
-    s1 --- l2
-    s1 --- l3
-    s1 --- l4
-    s2 --- l1
-    s2 --- l2
-    s2 --- l3
-    s2 --- l4
-```
-
-| Format | Recommended use | Repository behavior |
-| --- | --- | --- |
-| Mermaid | README files and automatically generated topology views | Text source renders directly on GitHub |
-| Draw.io XML | Detailed manual editing and rearrangement | Generated for deployed labs with `generate_drawio` |
-| SVG | Polished documentation and presentations | Store an exported image alongside the Markdown |
-| PNG | Maximum viewer compatibility | Store an exported image alongside the Markdown |
-| Graphviz, PlantUML, or D2 | Specialized automated layouts | Render externally before embedding |
-| ASCII | Terminals and plain-text output | Works everywhere but carries limited detail |
-
-Mermaid rendering is currently performed by the MCP client from topology data;
-it is not a separate native `clab-api-server` endpoint. Native Draw.io
-generation requires a deployed topology and depends on `clab-io-draw`. The
-upstream renderer may fail for a one-node topology with no links or position
-data.
-
 ## Example Questions
 
 Try these in an MCP-capable AI client:
@@ -360,7 +320,6 @@ Show every interface in mixed-cx-ex.
 Show the topology YAML for mixed-cx-ex.
 Get the last logs from node ex1 in mixed-cx-ex.
 Generate a horizontal draw.io diagram for mixed-cx-ex.
-Read the fabric1 topology YAML and show it as a Mermaid diagram.
 Restart only node ex1 and wait until it becomes healthy.
 List all runtime images on the lab host.
 Pull ghcr.io/srl-labs/alpine:latest.
