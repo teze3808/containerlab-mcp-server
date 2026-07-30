@@ -231,13 +231,43 @@ remote host.
 
 ### Topology Helpers
 
-| Tool | Description |
-| --- | --- |
-| `make_two_switch_aoscx_topology` | Generate, but do not deploy, a linked two-switch AOS-CX topology |
+| Tool | Pattern | Deployment behavior |
+| --- | --- | --- |
+| `generate_clos_topology` | Multi-tier CLOS or leaf-spine fabric | Generate only or optionally deploy |
+| `make_two_switch_aoscx_topology` | Two linked AOS-CX switches | Generate only |
+| `deploy_topology_content` | Arbitrary topology object | Deploy submitted topology |
+| `deploy_on_disk_lab` | Topology YAML already stored on the API host | Deploy stored topology |
 
-The topology helper defaults to
+`generate_clos_topology` accepts tier definitions, node kinds, runtime images,
+management addressing, naming prefixes, and an optional `deploy` flag. For
+example, two spine nodes and four leaf nodes produce eight inter-tier links.
+Keep `deploy=false` when the topology should be reviewed before any containers
+are created.
+
+`make_two_switch_aoscx_topology` defaults to
 `vrnetlab/aruba_arubaos-cx:10.17.1010`. Pass a different image tag when
 required by your environment.
+
+The MCP client can also compose common patterns such as a ring, triangle, full
+mesh, linear chain, or hub-and-spoke topology and submit the resulting object
+with `deploy_topology_content`. These patterns use the general deployment tool;
+they are not separate native `clab-api-server` endpoints.
+
+Example topology requests:
+
+```text
+Generate a CLOS topology called fabric1 with two AOS-CX spines and four
+vJunos-switch leaves. Do not deploy it.
+
+Generate a four-node AOS-CX ring using eth1 and eth2. Show the topology object
+for review before deployment.
+
+Create a triangle with one AOS-CX switch, one vJunos-switch, and one Linux
+client. Connect every node to the other two nodes.
+
+Create a hub-and-spoke lab with one router hub and three Linux clients, then
+deploy the topology.
+```
 
 ## Example Questions
 
