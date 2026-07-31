@@ -7,7 +7,6 @@ from containerlab_mcp.topologies import (
     generate_dual_plane_ai_fabric,
     generate_evpn_vxlan_fabric,
     generate_hub_spoke_wan,
-    generate_mermaid_diagram,
     generate_three_tier_clos,
     make_two_switch_aoscx_topology,
 )
@@ -51,43 +50,6 @@ def test_generate_branch_topology() -> None:
     assert topology["topology"]["nodes"]["firewall1"]["kind"] == "juniper_vsrx"
     assert topology["topology"]["nodes"]["client2"]["kind"] == "linux"
     assert_interfaces_are_unique(topology)
-
-
-def test_generate_mermaid_diagram() -> None:
-    topology = generate_branch_topology("branch1")
-    diagram = generate_mermaid_diagram(topology, direction="LR")
-
-    assert diagram.startswith("flowchart LR\n")
-    assert 'subgraph group0["wan"]' in diagram
-    assert 'n0["wan1<br/>juniper_vjunosrouter"]' in diagram
-    assert '---|"eth1 / eth1"|' in diagram
-    assert "class n2 security" in diagram
-    assert "class n4,n5 endpoint" in diagram
-
-
-def test_generate_mermaid_diagram_can_hide_details() -> None:
-    topology = make_two_switch_aoscx_topology("demo")
-    diagram = generate_mermaid_diagram(
-        topology,
-        include_interfaces=False,
-        include_kind=False,
-    )
-
-    assert 'n0["cx1"]' in diagram
-    assert "aruba_aoscx" not in diagram
-    assert "eth1" not in diagram
-    assert "n0 --- n1" in diagram
-
-
-def test_generate_mermaid_diagram_rejects_invalid_input() -> None:
-    with pytest.raises(ValueError, match="direction"):
-        generate_mermaid_diagram(
-            make_two_switch_aoscx_topology("demo"),
-            direction="sideways",  # type: ignore[arg-type]
-        )
-
-    with pytest.raises(ValueError, match="topology object"):
-        generate_mermaid_diagram({"name": "empty"})
 
 
 def test_generate_evpn_vxlan_fabric() -> None:
@@ -185,24 +147,10 @@ def test_generated_topology_deploy_is_opt_in(monkeypatch) -> None:
     fake_client = FakeClient()
     monkeypatch.setattr(server, "get_client", lambda: fake_client)
 
-    generated = server._return_or_deploy(topology, False)
-    assert generated["topology"] is topology
-    assert generated["diagram"]["format"] == "mermaid"
-    assert generated["diagram"]["content"].startswith("flowchart TB")
-    assert "deployment" not in generated
+    assert server._return_or_deploy(topology, False) is topology
     assert fake_client.deployed is None
     assert fake_client.closed is False
 
-    deployed = server._return_or_deploy(topology, True)
-    assert deployed["deployment"] == {"deployed": "wan1"}
-    assert deployed["topology"] is topology
+    assert server._return_or_deploy(topology, True) == {"deployed": "wan1"}
     assert fake_client.deployed is topology
     assert fake_client.closed is True
-
-
-def test_two_switch_mcp_helper_includes_diagram() -> None:
-    result = server.make_two_switch_aoscx_topology("demo")
-
-    assert result["topology"]["name"] == "demo"
-    assert result["diagram"]["format"] == "mermaid"
-    assert result["diagram"]["content"].startswith("flowchart LR")

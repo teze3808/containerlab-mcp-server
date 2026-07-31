@@ -1,6 +1,6 @@
 [project]
 name = "containerlab-mcp-server"
-version = "0.5.0"
+version = "0.5.1"
 description = "MCP server for the official Containerlab API Server"
 requires-python = ">=3.11"
 dependencies = [
