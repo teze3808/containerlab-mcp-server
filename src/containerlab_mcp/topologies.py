@@ -91,7 +91,11 @@ def _make_topology(
     return {"name": name, "topology": {"nodes": nodes, "links": links}}
 
 
-def generate_topology_preview(topology: dict[str, Any]) -> dict[str, Any]:
+def generate_topology_preview(
+    topology: dict[str, Any],
+    connection_purposes: list[str] | None = None,
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
     """Build a review bundle without sending anything to Containerlab."""
     topology_body = topology.get("topology")
     if not isinstance(topology_body, dict):
@@ -102,6 +106,11 @@ def generate_topology_preview(topology: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("topology must contain at least one node")
     if not isinstance(links, list):
         raise ValueError("topology links must be a list")
+    if (
+        connection_purposes is not None
+        and len(connection_purposes) != len(links)
+    ):
+        raise ValueError("connection purposes must match the number of links")
 
     node_ids = {name: f"n{index}" for index, name in enumerate(nodes)}
     diagram = ["flowchart TB"]
@@ -124,7 +133,7 @@ def generate_topology_preview(topology: dict[str, Any]) -> dict[str, Any]:
         diagram.append(f'  {node_ids[name]}["{escape(name, quote=True)}"]')
 
     connections: list[dict[str, str]] = []
-    for link in links:
+    for link_index, link in enumerate(links):
         endpoints = link.get("endpoints") if isinstance(link, dict) else None
         if not isinstance(endpoints, list) or len(endpoints) != 2:
             raise ValueError("every link must contain exactly two endpoints")
@@ -132,19 +141,21 @@ def generate_topology_preview(topology: dict[str, Any]) -> dict[str, Any]:
         right_node, right_interface = _split_endpoint(str(endpoints[1]))
         if left_node not in node_ids or right_node not in node_ids:
             raise ValueError("link endpoint references an unknown node")
-        connections.append(
-            {
-                "node_a": left_node,
-                "interface_a": left_interface,
-                "node_b": right_node,
-                "interface_b": right_interface,
-            }
-        )
+        connection = {
+            "node_a": left_node,
+            "interface_a": left_interface,
+            "node_b": right_node,
+            "interface_b": right_interface,
+        }
+        if connection_purposes is not None:
+            connection["purpose"] = connection_purposes[link_index]
+        connections.append(connection)
         diagram.append(f"  {node_ids[left_node]} --- {node_ids[right_node]}")
 
-    return {
+    preview = {
         "name": str(topology.get("name", "topology")),
         "status": "preview-only",
+        "summary": {"node_count": len(nodes), "link_count": len(links)},
         "diagram": {"format": "mermaid", "content": "\n".join(diagram)},
         "connection_table": connections,
         "devices": devices,
@@ -154,6 +165,42 @@ def generate_topology_preview(topology: dict[str, Any]) -> dict[str, Any]:
             "deploy_topology_content to build the lab."
         ),
     }
+    if connection_purposes is not None:
+        preview["link_summary"] = {
+            purpose: connection_purposes.count(purpose)
+            for purpose in dict.fromkeys(connection_purposes)
+        }
+    if notes:
+        preview["notes"] = notes
+    return preview
+
+
+def _make_parallel_topology(
+    name: str,
+    nodes: dict[str, dict[str, str]],
+    edges: list[tuple[str, str, str]],
+) -> tuple[dict[str, Any], list[str]]:
+    _validate_name(name)
+    interface_counters = {node: 0 for node in nodes}
+    links: list[dict[str, list[str]]] = []
+    purposes: list[str] = []
+    for left, right, purpose in edges:
+        if left not in nodes or right not in nodes:
+            raise ValueError(f"link references unknown node: {left}, {right}")
+        if left == right:
+            raise ValueError(f"self-links are not supported: {left}")
+        interface_counters[left] += 1
+        interface_counters[right] += 1
+        links.append(
+            {
+                "endpoints": [
+                    f"{left}:eth{interface_counters[left]}",
+                    f"{right}:eth{interface_counters[right]}",
+                ]
+            }
+        )
+        purposes.append(purpose)
+    return {"name": name, "topology": {"nodes": nodes, "links": links}}, purposes
 
 
 def _split_endpoint(endpoint: str) -> tuple[str, str]:
@@ -458,3 +505,105 @@ def generate_three_tier_clos(
         _full_bipartite(super_spines, spines)
         + _full_bipartite(spines, leaves),
     )
+
+
+def generate_lacp_topology(
+    name: str,
+    member_link_count: int = 2,
+    device_a_kind: str = "aruba_aoscx",
+    device_a_image: str = DEFAULT_AOSCX_IMAGE,
+    device_b_kind: str = "juniper_vjunosswitch",
+    device_b_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
+) -> tuple[dict[str, Any], list[str]]:
+    """Build two devices joined by parallel links intended for one LAG."""
+    _validate_counts(member_link_count=member_link_count)
+    nodes = {
+        "device1": {
+            "kind": device_a_kind,
+            "image": device_a_image,
+            "group": "lag-peer",
+        },
+        "device2": {
+            "kind": device_b_kind,
+            "image": device_b_image,
+            "group": "lag-peer",
+        },
+    }
+    edges = [
+        ("device1", "device2", "lacp-member") for _ in range(member_link_count)
+    ]
+    return _make_parallel_topology(name, nodes, edges)
+
+
+def generate_vsx_topology(
+    name: str,
+    isl_link_count: int = 2,
+    keepalive_link_count: int = 1,
+    downstream_count: int = 1,
+    downstream_links_per_peer: int = 1,
+    vsx_kind: str = "aruba_aoscx",
+    vsx_image: str = DEFAULT_AOSCX_IMAGE,
+    downstream_kind: str = "juniper_vjunosswitch",
+    downstream_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
+) -> tuple[dict[str, Any], list[str]]:
+    """Build VSX peer, keepalive, and dual-homed downstream cabling."""
+    _validate_counts(
+        isl_link_count=isl_link_count,
+        downstream_links_per_peer=downstream_links_per_peer,
+    )
+    _validate_optional_counts(
+        keepalive_link_count=keepalive_link_count,
+        downstream_count=downstream_count,
+    )
+    nodes = {
+        "vsx1": {"kind": vsx_kind, "image": vsx_image, "group": "vsx"},
+        "vsx2": {"kind": vsx_kind, "image": vsx_image, "group": "vsx"},
+    }
+    edges = [("vsx1", "vsx2", "vsx-isl") for _ in range(isl_link_count)]
+    edges.extend(
+        ("vsx1", "vsx2", "vsx-keepalive")
+        for _ in range(keepalive_link_count)
+    )
+    for downstream_index in range(1, downstream_count + 1):
+        downstream = f"access{downstream_index}"
+        nodes[downstream] = {
+            "kind": downstream_kind,
+            "image": downstream_image,
+            "group": "downstream",
+        }
+        for peer in ("vsx1", "vsx2"):
+            edges.extend(
+                (peer, downstream, "downstream-lag-member")
+                for _ in range(downstream_links_per_peer)
+            )
+    return _make_parallel_topology(name, nodes, edges)
+
+
+def generate_virtual_chassis_topology(
+    name: str,
+    member_count: int = 2,
+    vcp_links_per_adjacency: int = 2,
+    ring: bool = True,
+    member_kind: str = "juniper_vjunosswitch",
+    member_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
+) -> tuple[dict[str, Any], list[str]]:
+    """Build a Virtual Chassis cabling plan without device configuration."""
+    if member_count < 2:
+        raise ValueError("member_count must be at least 2")
+    _validate_counts(vcp_links_per_adjacency=vcp_links_per_adjacency)
+    members, nodes = _nodes(
+        "member",
+        member_count,
+        member_kind,
+        member_image,
+        "virtual-chassis",
+    )
+    adjacencies = list(zip(members, members[1:]))
+    if ring and member_count > 2:
+        adjacencies.append((members[-1], members[0]))
+    edges = [
+        (left, right, "virtual-chassis-port")
+        for left, right in adjacencies
+        for _ in range(vcp_links_per_adjacency)
+    ]
+    return _make_parallel_topology(name, nodes, edges)

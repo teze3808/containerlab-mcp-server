@@ -17,8 +17,11 @@ from .topologies import (
     generate_dual_plane_ai_fabric as build_dual_plane_ai_fabric,
     generate_evpn_vxlan_fabric as build_evpn_vxlan_fabric,
     generate_hub_spoke_wan as build_hub_spoke_wan,
+    generate_lacp_topology as build_lacp_topology,
     generate_topology_preview as build_topology_preview,
     generate_three_tier_clos as build_three_tier_clos,
+    generate_virtual_chassis_topology as build_virtual_chassis_topology,
+    generate_vsx_topology as build_vsx_topology,
     make_two_switch_aoscx_topology as make_topology,
 )
 
@@ -862,6 +865,93 @@ def make_two_switch_aoscx_topology(
 def preview_topology(topology: dict[str, Any]) -> dict[str, Any]:
     """Preview any topology with a diagram, links, devices, and image versions."""
     return build_topology_preview(topology)
+
+
+@mcp.tool()
+def generate_lacp_topology(
+    name: str,
+    member_link_count: int = 2,
+    device_a_kind: str = "aruba_aoscx",
+    device_a_image: str = DEFAULT_AOSCX_IMAGE,
+    device_b_kind: str = "juniper_vjunosswitch",
+    device_b_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
+) -> dict[str, Any]:
+    """Preview two devices with parallel links intended for one LACP LAG."""
+    topology, purposes = build_lacp_topology(
+        name,
+        member_link_count,
+        device_a_kind,
+        device_a_image,
+        device_b_kind,
+        device_b_image,
+    )
+    return build_topology_preview(
+        topology,
+        purposes,
+        ["This helper creates physical links only; it does not configure LACP."],
+    )
+
+
+@mcp.tool()
+def generate_vsx_topology(
+    name: str,
+    isl_link_count: int = 2,
+    keepalive_link_count: int = 1,
+    downstream_count: int = 1,
+    downstream_links_per_peer: int = 1,
+    vsx_kind: str = "aruba_aoscx",
+    vsx_image: str = DEFAULT_AOSCX_IMAGE,
+    downstream_kind: str = "juniper_vjunosswitch",
+    downstream_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
+) -> dict[str, Any]:
+    """Preview VSX ISL, keepalive, and dual-homed downstream links."""
+    topology, purposes = build_vsx_topology(
+        name,
+        isl_link_count,
+        keepalive_link_count,
+        downstream_count,
+        downstream_links_per_peer,
+        vsx_kind,
+        vsx_image,
+        downstream_kind,
+        downstream_image,
+    )
+    return build_topology_preview(
+        topology,
+        purposes,
+        [
+            "This helper creates physical links only; it does not configure VSX.",
+            "Set keepalive_link_count to 0 when using an existing routed path.",
+        ],
+    )
+
+
+@mcp.tool()
+def generate_virtual_chassis_topology(
+    name: str,
+    member_count: int = 2,
+    vcp_links_per_adjacency: int = 2,
+    ring: bool = True,
+    member_kind: str = "juniper_vjunosswitch",
+    member_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
+) -> dict[str, Any]:
+    """Preview Virtual Chassis VCP cabling without configuring members."""
+    topology, purposes = build_virtual_chassis_topology(
+        name,
+        member_count,
+        vcp_links_per_adjacency,
+        ring,
+        member_kind,
+        member_image,
+    )
+    return build_topology_preview(
+        topology,
+        purposes,
+        [
+            "This helper creates a cabling plan only; it does not configure VC.",
+            "Juniper vJunos-switch does not support forming a Virtual Chassis.",
+        ],
+    )
 
 
 @mcp.tool()

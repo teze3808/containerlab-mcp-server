@@ -21,7 +21,7 @@ stop, and destroy labs without exposing unrestricted shell access.
 ## Overview
 
 `containerlab-mcp-server` wraps the official Containerlab HTTPS API and exposes
-71 focused MCP tools for lab lifecycle, command execution, configuration
+74 focused MCP tools for lab lifecycle, command execution, configuration
 artifacts, packet capture, network impairments, topology generation, remote
 access, and multi-host network stitching. Once configured, an AI assistant can
 answer requests such as:
@@ -55,8 +55,9 @@ These API server capabilities are currently exposed through MCP:
 - **Terminal Sessions:** create, inspect, and terminate constrained SSH,
   shell, and telnet sessions.
 - **Topology Tools:** generate CLOS, campus, branch, EVPN-VXLAN, dual-plane AI,
-  hub-and-spoke WAN, and two-switch previews with Mermaid diagrams, connection
-  tables, device inventories, and Draw.io XML.
+  hub-and-spoke WAN, LACP, VSX, Virtual Chassis cabling, and two-switch previews
+  with Mermaid diagrams, connection tables, device inventories, and Draw.io
+  XML.
 - **Network Tools:** inspect interfaces, apply or reset netem impairments, and
   create or delete multi-host VXLAN tunnels.
 - **Packet Capture:** inspect or manage EdgeShark and create Packetflix or
@@ -200,6 +201,9 @@ Startup configuration support uses `put_topology_file` to store the config and
 | `generate_dual_plane_ai_fabric` | Generate isolated A/B fabrics with dual-attached AI hosts |
 | `generate_hub_spoke_wan` | Generate a single- or multi-hub routed WAN |
 | `generate_three_tier_clos` | Generate a super-spine, spine, and leaf CLOS |
+| `generate_lacp_topology` | Generate parallel links intended for one LACP LAG |
+| `generate_vsx_topology` | Generate VSX ISL, keepalive, and downstream links |
+| `generate_virtual_chassis_topology` | Generate Virtual Chassis VCP cabling |
 | `preview_topology` | Preview any topology with a diagram, links, brands, and image versions |
 
 ### Custom Node Templates
@@ -248,6 +252,9 @@ remote host.
 | `generate_dual_plane_ai_fabric` | Isolated A/B fabrics and dual-attached AI hosts | Preview only |
 | `generate_hub_spoke_wan` | One or more hubs connected to every spoke | Preview only |
 | `generate_three_tier_clos` | Super-spines, spines, and leaves | Preview only |
+| `generate_lacp_topology` | Parallel links between two LAG peers | Preview only |
+| `generate_vsx_topology` | VSX peers, ISL, keepalive, and downstream devices | Preview only |
+| `generate_virtual_chassis_topology` | Chain or ring of VCP-connected members | Preview only |
 | `make_two_switch_aoscx_topology` | Two linked AOS-CX switches | Preview only |
 | `preview_topology` | Any valid topology object | Preview only |
 | `deploy_topology_content` | Arbitrary topology object | Deploy submitted topology |
@@ -258,12 +265,14 @@ management addressing, and naming prefixes. The MCP wrapper always sends
 `deploy=false`; pass its topology object to `preview_topology` before any
 containers are created.
 
-The six environment-specific generators allocate unique `ethN` interfaces and
-set node groups for visualization. They are preview-only and never contact the
-Containerlab API. Each result contains:
+The preview helpers allocate unique `ethN` interfaces and set node groups for
+visualization. They are preview-only and never contact the Containerlab API.
+Each result contains:
 
 - `diagram`: a compact Mermaid network diagram.
 - `connection_table`: both endpoints and interfaces for every link.
+- `link_summary`: physical-link counts by purpose when the helper understands
+  LACP, VSX, or Virtual Chassis intent.
 - `devices`: node, group, detected brand, kind, full image reference, and image
   version.
 - `topology`: the exact object that can be submitted after review.
@@ -282,9 +291,9 @@ devices. Other Containerlab kinds may work through the native API wrappers, but
 they have not been validated by this project.
 
 These helpers build nodes and links only. They do not generate VLAN, OSPF, BGP,
-EVPN-VXLAN, firewall, QoS, PFC, ECN, or RoCE configuration. Apply those
-features separately with startup configurations or supported node command
-tools.
+EVPN-VXLAN, LACP, VSX, Virtual Chassis, firewall, QoS, PFC, ECN, or RoCE
+configuration. Apply those features separately with startup configurations or
+supported node command tools.
 
 The MCP client can still compose arbitrary patterns such as a ring, triangle,
 full mesh, or linear chain. Pass the resulting object to `preview_topology`,
@@ -541,6 +550,110 @@ flowchart TB
 | spine2 | Aruba | `aruba_aoscx` | `10.18.0001` |
 | leaf1 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
 | leaf2 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+
+#### LACP Links
+
+Example prompt:
+
+```text
+Create two switches connected by a two-member LACP bundle. Create physical
+links only and do not configure or deploy the switches. Show the preview.
+```
+
+Example output:
+
+```mermaid
+flowchart TB
+  D1["device1"] --- D2["device2"]
+  D1 --- D2
+```
+
+Link summary: **2 `lacp-member` links**
+
+| Node A | Interface A | Node B | Interface B | Purpose |
+| --- | --- | --- | --- | --- |
+| device1 | eth1 | device2 | eth1 | `lacp-member` |
+| device1 | eth2 | device2 | eth2 | `lacp-member` |
+
+| Node | Brand | Kind | Image version |
+| --- | --- | --- | --- |
+| device1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| device2 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+
+#### Aruba VSX Links
+
+Example prompt:
+
+```text
+Create an Aruba VSX cabling preview called vsx1 with two ISL member links, one
+direct keepalive link, and one downstream switch connected once to each VSX
+peer. Do not configure or deploy the devices.
+```
+
+Example output:
+
+```mermaid
+flowchart TB
+  V1["vsx1"] --- V2["vsx2"]
+  V1 --- V2
+  V1 --- V2
+  V1 --- A1["access1"]
+  V2 --- A1
+```
+
+Link summary: **2 `vsx-isl` + 1 `vsx-keepalive` + 2
+`downstream-lag-member` = 5 physical links**
+
+| Node A | Interface A | Node B | Interface B | Purpose |
+| --- | --- | --- | --- | --- |
+| vsx1 | eth1 | vsx2 | eth1 | `vsx-isl` |
+| vsx1 | eth2 | vsx2 | eth2 | `vsx-isl` |
+| vsx1 | eth3 | vsx2 | eth3 | `vsx-keepalive` |
+| vsx1 | eth4 | access1 | eth1 | `downstream-lag-member` |
+| vsx2 | eth4 | access1 | eth2 | `downstream-lag-member` |
+
+| Node | Brand | Kind | Image version |
+| --- | --- | --- | --- |
+| vsx1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| vsx2 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| access1 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+
+Set `keepalive_link_count=0` when the keepalive uses an existing routed path.
+
+#### Juniper Virtual Chassis Cabling
+
+Example prompt:
+
+```text
+Create a three-member Juniper Virtual Chassis cabling preview called vc1 in a
+ring, using one VCP link per adjacency. Do not configure or deploy it.
+```
+
+Example output:
+
+```mermaid
+flowchart TB
+  M1["member1"] --- M2["member2"]
+  M2 --- M3["member3"]
+  M3 --- M1
+```
+
+Link summary: **3 `virtual-chassis-port` links**
+
+| Node A | Interface A | Node B | Interface B | Purpose |
+| --- | --- | --- | --- | --- |
+| member1 | eth1 | member2 | eth1 | `virtual-chassis-port` |
+| member2 | eth2 | member3 | eth1 | `virtual-chassis-port` |
+| member3 | eth2 | member1 | eth2 | `virtual-chassis-port` |
+
+| Node | Brand | Kind | Image version |
+| --- | --- | --- | --- |
+| member1 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+| member2 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+| member3 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+
+This helper previews cabling only. Juniper vJunos-switch does not support
+forming a Virtual Chassis.
 
 Example topology requests:
 

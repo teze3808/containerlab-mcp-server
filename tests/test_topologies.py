@@ -7,8 +7,11 @@ from containerlab_mcp.topologies import (
     generate_dual_plane_ai_fabric,
     generate_evpn_vxlan_fabric,
     generate_hub_spoke_wan,
+    generate_lacp_topology,
     generate_topology_preview,
     generate_three_tier_clos,
+    generate_virtual_chassis_topology,
+    generate_vsx_topology,
     make_two_switch_aoscx_topology,
 )
 
@@ -110,6 +113,48 @@ def test_generate_three_tier_clos() -> None:
     assert_interfaces_are_unique(topology)
 
 
+def test_generate_lacp_topology_uses_parallel_unique_links() -> None:
+    topology, purposes = generate_lacp_topology("lag1", member_link_count=2)
+
+    assert topology["topology"]["links"] == [
+        {"endpoints": ["device1:eth1", "device2:eth1"]},
+        {"endpoints": ["device1:eth2", "device2:eth2"]},
+    ]
+    assert purposes == ["lacp-member", "lacp-member"]
+    assert_interfaces_are_unique(topology)
+
+
+def test_generate_vsx_topology_counts_link_purposes() -> None:
+    topology, purposes = generate_vsx_topology("vsx1")
+    preview = generate_topology_preview(topology, purposes)
+
+    assert len(topology["topology"]["nodes"]) == 3
+    assert len(topology["topology"]["links"]) == 5
+    assert preview["link_summary"] == {
+        "vsx-isl": 2,
+        "vsx-keepalive": 1,
+        "downstream-lag-member": 2,
+    }
+    assert_interfaces_are_unique(topology)
+
+
+def test_generate_virtual_chassis_ring_link_count() -> None:
+    topology, purposes = generate_virtual_chassis_topology(
+        "vc1",
+        member_count=4,
+        vcp_links_per_adjacency=2,
+    )
+
+    assert len(topology["topology"]["nodes"]) == 4
+    assert len(topology["topology"]["links"]) == 8
+    assert purposes == ["virtual-chassis-port"] * 8
+    assert topology["topology"]["links"][-1]["endpoints"] == [
+        "member4:eth4",
+        "member1:eth4",
+    ]
+    assert_interfaces_are_unique(topology)
+
+
 @pytest.mark.parametrize(
     ("builder", "kwargs"),
     [
@@ -119,6 +164,9 @@ def test_generate_three_tier_clos() -> None:
         (generate_dual_plane_ai_fabric, {"host_count": 0}),
         (generate_hub_spoke_wan, {"spoke_count": 0}),
         (generate_three_tier_clos, {"leaf_count": 0}),
+        (generate_lacp_topology, {"member_link_count": 0}),
+        (generate_vsx_topology, {"isl_link_count": 0}),
+        (generate_virtual_chassis_topology, {"member_count": 1}),
     ],
 )
 def test_topology_generators_reject_invalid_counts(builder, kwargs) -> None:
@@ -160,6 +208,13 @@ def test_preview_topology_rejects_invalid_topology() -> None:
         generate_topology_preview({"name": "empty"})
 
 
+def test_preview_topology_rejects_mismatched_purposes() -> None:
+    topology, _ = generate_lacp_topology("lag1")
+
+    with pytest.raises(ValueError, match="purposes"):
+        generate_topology_preview(topology, ["only-one-purpose"])
+
+
 def test_mcp_topology_helper_returns_preview() -> None:
     preview = server.generate_campus_topology(
         "campus1",
@@ -171,6 +226,18 @@ def test_mcp_topology_helper_returns_preview() -> None:
     assert preview["status"] == "preview-only"
     assert preview["topology"]["name"] == "campus1"
     assert len(preview["devices"]) == 3
+
+
+def test_mcp_link_intent_helpers_return_preview_notes() -> None:
+    lacp = server.generate_lacp_topology("lag1")
+    vsx = server.generate_vsx_topology("vsx1")
+    vc = server.generate_virtual_chassis_topology("vc1")
+
+    assert lacp["summary"]["link_count"] == 2
+    assert lacp["connection_table"][0]["purpose"] == "lacp-member"
+    assert vsx["summary"]["link_count"] == 5
+    assert vc["summary"]["link_count"] == 2
+    assert "does not support" in vc["notes"][1]
 
 
 def test_native_clos_mcp_generation_never_deploys(monkeypatch) -> None:
