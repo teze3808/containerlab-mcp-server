@@ -301,12 +301,33 @@ switch, and two access switches. Do not deploy it. Show the network diagram,
 connection table, device brands, and image versions for review.
 ```
 
+Example output:
+
+**Network diagram**
+
 ```mermaid
 flowchart TB
   C1["core1"] --- D1["dist1"]
   D1 --- A1["access1"]
   D1 --- A2["access2"]
 ```
+
+**Connection table**
+
+| Node A | Interface A | Node B | Interface B |
+| --- | --- | --- | --- |
+| core1 | eth1 | dist1 | eth1 |
+| dist1 | eth2 | access1 | eth1 |
+| dist1 | eth3 | access2 | eth1 |
+
+**Device inventory**
+
+| Node | Brand | Kind | Image version |
+| --- | --- | --- | --- |
+| core1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| dist1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| access1 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+| access2 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
 
 #### Branch
 
@@ -318,12 +339,33 @@ switch, and one Linux client. Do not deploy it. Show the network diagram,
 connection table, device brands, and image versions for review.
 ```
 
+Example output:
+
+**Network diagram**
+
 ```mermaid
 flowchart TB
   W1["wan1"] --- F["firewall1"]
   F --- S["access1"]
   S --- C1["client1"]
 ```
+
+**Connection table**
+
+| Node A | Interface A | Node B | Interface B |
+| --- | --- | --- | --- |
+| wan1 | eth1 | firewall1 | eth1 |
+| firewall1 | eth2 | access1 | eth1 |
+| access1 | eth2 | client1 | eth1 |
+
+**Device inventory**
+
+| Node | Brand | Kind | Image version |
+| --- | --- | --- | --- |
+| wan1 | Juniper | `juniper_vjunosrouter` | `26.2R1.7-nativefix` |
+| firewall1 | Juniper | `juniper_vsrx` | `26.2R1.7` |
+| access1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| client1 | Linux | `linux` | `latest` |
 
 #### EVPN-VXLAN Fabric
 
@@ -335,6 +377,10 @@ switches, no border leaves, and one Linux host on each leaf. Do not deploy it.
 Show the network diagram, connection table, device brands, and image versions.
 ```
 
+Example output:
+
+**Network diagram**
+
 ```mermaid
 flowchart TB
   S1["spine1"] --- L1["leaf1"]
@@ -344,6 +390,28 @@ flowchart TB
   L1 --- H1["host1-1"]
   L2 --- H2["host2-1"]
 ```
+
+**Connection table**
+
+| Node A | Interface A | Node B | Interface B |
+| --- | --- | --- | --- |
+| spine1 | eth1 | leaf1 | eth1 |
+| spine1 | eth2 | leaf2 | eth1 |
+| spine2 | eth1 | leaf1 | eth2 |
+| spine2 | eth2 | leaf2 | eth2 |
+| leaf1 | eth3 | host1-1 | eth1 |
+| leaf2 | eth3 | host2-1 | eth1 |
+
+**Device inventory**
+
+| Node | Brand | Kind | Image version |
+| --- | --- | --- | --- |
+| spine1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| spine2 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| leaf1 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+| leaf2 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+| host1-1 | Linux | `linux` | `latest` |
+| host2-1 | Linux | `linux` | `latest` |
 
 #### Dual-Plane AI Fabric
 
@@ -355,6 +423,10 @@ plane, plus two hosts connected to both planes. Do not deploy it. Show the
 network diagram, connection table, device brands, and image versions.
 ```
 
+Example output:
+
+**Network diagram**
+
 ```mermaid
 flowchart TB
   SA["spine-a1"] --- LA["leaf-a1"]
@@ -364,6 +436,28 @@ flowchart TB
   LA --- H2["ai-host2"]
   LB --- H2
 ```
+
+**Connection table**
+
+| Node A | Interface A | Node B | Interface B |
+| --- | --- | --- | --- |
+| spine-a1 | eth1 | leaf-a1 | eth1 |
+| spine-b1 | eth1 | leaf-b1 | eth1 |
+| leaf-a1 | eth2 | ai-host1 | eth1 |
+| leaf-b1 | eth2 | ai-host1 | eth2 |
+| leaf-a1 | eth3 | ai-host2 | eth1 |
+| leaf-b1 | eth3 | ai-host2 | eth2 |
+
+**Device inventory**
+
+| Node | Brand | Kind | Image version |
+| --- | --- | --- | --- |
+| spine-a1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| leaf-a1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| spine-b1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| leaf-b1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| ai-host1 | Linux | `linux` | `latest` |
+| ai-host2 | Linux | `linux` | `latest` |
 
 #### Hub-and-Spoke WAN
 
@@ -375,12 +469,33 @@ routers. Do not deploy it. Show the network diagram, connection table, device
 brands, and image versions for review.
 ```
 
+Example output:
+
+**Network diagram**
+
 ```mermaid
 flowchart TB
   H1["hub1"] --- S1["spoke1"]
   H1 --- S2["spoke2"]
   H1 --- S3["spoke3"]
 ```
+
+**Connection table**
+
+| Node A | Interface A | Node B | Interface B |
+| --- | --- | --- | --- |
+| hub1 | eth1 | spoke1 | eth1 |
+| hub1 | eth2 | spoke2 | eth1 |
+| hub1 | eth3 | spoke3 | eth1 |
+
+**Device inventory**
+
+| Node | Brand | Kind | Image version |
+| --- | --- | --- | --- |
+| hub1 | Juniper | `juniper_vjunosrouter` | `26.2R1.7-nativefix` |
+| spoke1 | Juniper | `juniper_vjunosrouter` | `26.2R1.7-nativefix` |
+| spoke2 | Juniper | `juniper_vjunosrouter` | `26.2R1.7-nativefix` |
+| spoke3 | Juniper | `juniper_vjunosrouter` | `26.2R1.7-nativefix` |
 
 #### Three-Tier CLOS
 
@@ -392,6 +507,10 @@ switches, and two leaf switches. Do not deploy it. Show the network diagram,
 connection table, device brands, and image versions for review.
 ```
 
+Example output:
+
+**Network diagram**
+
 ```mermaid
 flowchart TB
   SS1["super-spine1"] --- S1["spine1"]
@@ -401,6 +520,27 @@ flowchart TB
   S2 --- L1
   S2 --- L2
 ```
+
+**Connection table**
+
+| Node A | Interface A | Node B | Interface B |
+| --- | --- | --- | --- |
+| super-spine1 | eth1 | spine1 | eth1 |
+| super-spine1 | eth2 | spine2 | eth1 |
+| spine1 | eth2 | leaf1 | eth1 |
+| spine1 | eth3 | leaf2 | eth1 |
+| spine2 | eth2 | leaf1 | eth2 |
+| spine2 | eth3 | leaf2 | eth2 |
+
+**Device inventory**
+
+| Node | Brand | Kind | Image version |
+| --- | --- | --- | --- |
+| super-spine1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| spine1 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| spine2 | Aruba | `aruba_aoscx` | `10.18.0001` |
+| leaf1 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
+| leaf2 | Juniper | `juniper_vjunosswitch` | `26.2R1.7-nativefix` |
 
 Example topology requests:
 
