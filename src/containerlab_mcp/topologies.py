@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from html import escape
 from itertools import combinations
-from typing import Any
+from typing import Any, Literal
 
 
 DEFAULT_AOSCX_IMAGE = "vrnetlab/aruba_arubaos-cx:10.18.0001"
@@ -13,6 +14,7 @@ DEFAULT_VJUNOS_ROUTER_IMAGE = (
 )
 DEFAULT_VSRX_IMAGE = "vrnetlab/juniper_vsrx:26.2R1.7"
 DEFAULT_LINUX_IMAGE = "ghcr.io/srl-labs/network-multitool:latest"
+DiagramDirection = Literal["TB", "LR", "BT", "RL"]
 
 
 def _validate_name(name: str) -> None:
@@ -88,6 +90,101 @@ def _make_topology(
         )
 
     return {"name": name, "topology": {"nodes": nodes, "links": links}}
+
+
+def generate_mermaid_diagram(
+    topology: dict[str, Any],
+    direction: DiagramDirection = "TB",
+    include_interfaces: bool = True,
+    include_kind: bool = True,
+) -> str:
+    """Render a Containerlab topology object as a Mermaid flowchart."""
+    if direction not in {"TB", "LR", "BT", "RL"}:
+        raise ValueError("direction must be one of TB, LR, BT, or RL")
+
+    topology_body = topology.get("topology")
+    if not isinstance(topology_body, dict):
+        raise ValueError("topology must contain a topology object")
+    nodes = topology_body.get("nodes")
+    links = topology_body.get("links", [])
+    if not isinstance(nodes, dict) or not nodes:
+        raise ValueError("topology must contain at least one node")
+    if not isinstance(links, list):
+        raise ValueError("topology links must be a list")
+
+    node_ids = {name: f"n{index}" for index, name in enumerate(nodes)}
+    grouped_nodes: dict[str, list[str]] = {}
+    for name, attributes in nodes.items():
+        group = str(attributes.get("group", "ungrouped"))
+        grouped_nodes.setdefault(group, []).append(name)
+
+    lines = [f"flowchart {direction}"]
+    topology_name = escape(str(topology.get("name", "topology")), quote=True)
+    lines.append(f"  %% {topology_name}")
+    network_nodes: list[str] = []
+    security_nodes: list[str] = []
+    endpoint_nodes: list[str] = []
+
+    for group_index, (group, names) in enumerate(grouped_nodes.items()):
+        group_label = escape(group, quote=True)
+        lines.append(f'  subgraph group{group_index}["{group_label}"]')
+        for name in names:
+            attributes = nodes[name]
+            kind = str(attributes.get("kind", "node"))
+            label = escape(name, quote=True)
+            if include_kind:
+                label = f"{label}<br/>{escape(kind, quote=True)}"
+            lines.append(f'    {node_ids[name]}["{label}"]')
+            if kind == "linux":
+                endpoint_nodes.append(node_ids[name])
+            elif "srx" in kind.lower() or group == "security":
+                security_nodes.append(node_ids[name])
+            else:
+                network_nodes.append(node_ids[name])
+        lines.append("  end")
+
+    for link in links:
+        endpoints = link.get("endpoints") if isinstance(link, dict) else None
+        if not isinstance(endpoints, list) or len(endpoints) != 2:
+            raise ValueError("every link must contain exactly two endpoints")
+        left_node, left_interface = _split_endpoint(str(endpoints[0]))
+        right_node, right_interface = _split_endpoint(str(endpoints[1]))
+        if left_node not in node_ids or right_node not in node_ids:
+            raise ValueError("link endpoint references an unknown node")
+        link_label = ""
+        if include_interfaces:
+            interfaces = escape(
+                f"{left_interface} / {right_interface}",
+                quote=True,
+            )
+            link_label = f'|"{interfaces}"|'
+        lines.append(
+            f"  {node_ids[left_node]} ---{link_label} {node_ids[right_node]}"
+        )
+
+    lines.extend(
+        [
+            "  classDef network fill:#e8f0ff,stroke:#3563c9,color:#102040",
+            "  classDef security fill:#ffe8e8,stroke:#c24141,color:#4a1717",
+            "  classDef endpoint fill:#dcf7ed,stroke:#0b7f5f,color:#102a24",
+        ]
+    )
+    if network_nodes:
+        lines.append(f"  class {','.join(network_nodes)} network")
+    if security_nodes:
+        lines.append(f"  class {','.join(security_nodes)} security")
+    if endpoint_nodes:
+        lines.append(f"  class {','.join(endpoint_nodes)} endpoint")
+    return "\n".join(lines)
+
+
+def _split_endpoint(endpoint: str) -> tuple[str, str]:
+    if ":" not in endpoint:
+        raise ValueError(f"invalid link endpoint: {endpoint}")
+    node, interface = endpoint.rsplit(":", 1)
+    if not node or not interface:
+        raise ValueError(f"invalid link endpoint: {endpoint}")
+    return node, interface
 
 
 def make_two_switch_aoscx_topology(

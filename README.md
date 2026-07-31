@@ -21,7 +21,7 @@ stop, and destroy labs without exposing unrestricted shell access.
 ## Overview
 
 `containerlab-mcp-server` wraps the official Containerlab HTTPS API and exposes
-70 focused MCP tools for lab lifecycle, command execution, configuration
+71 focused MCP tools for lab lifecycle, command execution, configuration
 artifacts, packet capture, network impairments, topology generation, remote
 access, and multi-host network stitching. Once configured, an AI assistant can
 answer requests such as:
@@ -55,7 +55,8 @@ These API server capabilities are currently exposed through MCP:
 - **Terminal Sessions:** create, inspect, and terminate constrained SSH,
   shell, and telnet sessions.
 - **Topology Tools:** generate CLOS, campus, branch, EVPN-VXLAN, dual-plane AI,
-  hub-and-spoke WAN, and two-switch topologies, plus Draw.io XML.
+  hub-and-spoke WAN, and two-switch topologies, plus Mermaid and Draw.io
+  diagrams.
 - **Network Tools:** inspect interfaces, apply or reset netem impairments, and
   create or delete multi-host VXLAN tunnels.
 - **Packet Capture:** inspect or manage EdgeShark and create Packetflix or
@@ -199,6 +200,7 @@ Startup configuration support uses `put_topology_file` to store the config and
 | `generate_dual_plane_ai_fabric` | Generate isolated A/B fabrics with dual-attached AI hosts |
 | `generate_hub_spoke_wan` | Generate a single- or multi-hub routed WAN |
 | `generate_three_tier_clos` | Generate a super-spine, spine, and leaf CLOS |
+| `generate_topology_diagram` | Render any submitted topology object as Mermaid |
 
 ### Custom Node Templates
 
@@ -246,7 +248,8 @@ remote host.
 | `generate_dual_plane_ai_fabric` | Isolated A/B fabrics and dual-attached AI hosts | Generate only or optionally deploy |
 | `generate_hub_spoke_wan` | One or more hubs connected to every spoke | Generate only or optionally deploy |
 | `generate_three_tier_clos` | Super-spines, spines, and leaves | Generate only or optionally deploy |
-| `make_two_switch_aoscx_topology` | Two linked AOS-CX switches | Generate only |
+| `make_two_switch_aoscx_topology` | Two linked AOS-CX switches | Generate topology and diagram |
+| `generate_topology_diagram` | Any valid Containerlab topology object | Generate Mermaid only |
 | `deploy_topology_content` | Arbitrary topology object | Deploy submitted topology |
 | `deploy_on_disk_lab` | Topology YAML already stored on the API host | Deploy stored topology |
 
@@ -265,6 +268,19 @@ set node groups for visualization. They default to `deploy=false`; set
 `deploy=true` only after reviewing the generated topology and confirming host
 capacity and image availability. Image and kind parameters can be replaced for
 each role.
+
+Each environment-specific generator returns a bundle with:
+
+- `topology`: the raw Containerlab topology object.
+- `diagram`: Mermaid format and source, grouped by node role and labelled with
+  node kinds and link interfaces.
+- `deployment`: the API deployment result, present only when `deploy=true`.
+
+The deployment path sends only `topology` to `clab-api-server`; diagram metadata
+is never included in the Containerlab payload. Diagram direction can be `TB`,
+`LR`, `BT`, or `RL`. Use `generate_topology_diagram` to visualize a topology
+from `generate_clos_topology`, topology YAML converted to an object, or any
+custom topology assembled by the MCP client.
 
 The default role images are AOS-CX `10.18.0001`, vJunos-switch and
 vJunos-router `26.2R1.7-nativefix`, vSRX `26.2R1.7`, and the public
@@ -288,7 +304,7 @@ vJunos-switch leaves. Do not deploy it.
 
 Generate a campus topology called campus1 with two core, two distribution, and
 six access switches. Use the installed CX and vJunos-switch images. Do not
-deploy it.
+deploy it. Display the returned Mermaid diagram.
 
 Generate a branch called branch1 with two WAN routers, one vSRX firewall, one
 CX access switch, and three Linux clients. Show it for review.

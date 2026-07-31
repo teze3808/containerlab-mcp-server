@@ -12,11 +12,13 @@ from .topologies import (
     DEFAULT_VJUNOS_ROUTER_IMAGE,
     DEFAULT_VJUNOS_SWITCH_IMAGE,
     DEFAULT_VSRX_IMAGE,
+    DiagramDirection,
     generate_branch_topology as build_branch_topology,
     generate_campus_topology as build_campus_topology,
     generate_dual_plane_ai_fabric as build_dual_plane_ai_fabric,
     generate_evpn_vxlan_fabric as build_evpn_vxlan_fabric,
     generate_hub_spoke_wan as build_hub_spoke_wan,
+    generate_mermaid_diagram,
     generate_three_tier_clos as build_three_tier_clos,
     make_two_switch_aoscx_topology as make_topology,
 )
@@ -847,19 +849,58 @@ def make_two_switch_aoscx_topology(
     name: str,
     image: str = "vrnetlab/aruba_arubaos-cx:10.17.1010",
     link_interface: str = "eth1",
+    diagram_direction: DiagramDirection = "LR",
 ) -> dict[str, Any]:
-    """Generate a two-switch AOS-CX topology object without deploying it."""
-    return make_topology(name=name, image=image, link_interface=link_interface)
+    """Generate a two-switch AOS-CX topology and Mermaid diagram."""
+    topology = make_topology(
+        name=name,
+        image=image,
+        link_interface=link_interface,
+    )
+    return _return_or_deploy(topology, False, diagram_direction)
 
 
-def _return_or_deploy(topology: dict[str, Any], deploy: bool) -> Any:
-    if not deploy:
-        return topology
-    client = get_client()
-    try:
-        return client.deploy_topology_content(topology)
-    finally:
-        client.close()
+@mcp.tool()
+def generate_topology_diagram(
+    topology: dict[str, Any],
+    direction: DiagramDirection = "TB",
+    include_interfaces: bool = True,
+    include_kind: bool = True,
+) -> dict[str, str]:
+    """Generate a Mermaid network diagram from any topology object."""
+    return {
+        "format": "mermaid",
+        "content": generate_mermaid_diagram(
+            topology,
+            direction=direction,
+            include_interfaces=include_interfaces,
+            include_kind=include_kind,
+        ),
+    }
+
+
+def _return_or_deploy(
+    topology: dict[str, Any],
+    deploy: bool,
+    diagram_direction: DiagramDirection = "TB",
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "topology": topology,
+        "diagram": {
+            "format": "mermaid",
+            "content": generate_mermaid_diagram(
+                topology,
+                direction=diagram_direction,
+            ),
+        },
+    }
+    if deploy:
+        client = get_client()
+        try:
+            result["deployment"] = client.deploy_topology_content(topology)
+        finally:
+            client.close()
+    return result
 
 
 @mcp.tool()
@@ -875,8 +916,9 @@ def generate_campus_topology(
     access_kind: str = "juniper_vjunosswitch",
     access_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
     deploy: bool = False,
+    diagram_direction: DiagramDirection = "TB",
 ) -> Any:
-    """Generate a redundant campus topology and optionally deploy after approval."""
+    """Generate a campus topology with Mermaid and optionally deploy it."""
     topology = build_campus_topology(
         name,
         core_count,
@@ -889,7 +931,7 @@ def generate_campus_topology(
         access_kind,
         access_image,
     )
-    return _return_or_deploy(topology, deploy)
+    return _return_or_deploy(topology, deploy, diagram_direction)
 
 
 @mcp.tool()
@@ -906,8 +948,9 @@ def generate_branch_topology(
     client_kind: str = "linux",
     client_image: str = DEFAULT_LINUX_IMAGE,
     deploy: bool = False,
+    diagram_direction: DiagramDirection = "LR",
 ) -> Any:
-    """Generate a dual-WAN branch topology and optionally deploy after approval."""
+    """Generate a branch topology with Mermaid and optionally deploy it."""
     topology = build_branch_topology(
         name,
         wan_count,
@@ -921,7 +964,7 @@ def generate_branch_topology(
         client_kind,
         client_image,
     )
-    return _return_or_deploy(topology, deploy)
+    return _return_or_deploy(topology, deploy, diagram_direction)
 
 
 @mcp.tool()
@@ -938,8 +981,9 @@ def generate_evpn_vxlan_fabric(
     host_kind: str = "linux",
     host_image: str = DEFAULT_LINUX_IMAGE,
     deploy: bool = False,
+    diagram_direction: DiagramDirection = "TB",
 ) -> Any:
-    """Generate an EVPN-VXLAN-ready fabric and optionally deploy after approval."""
+    """Generate an EVPN-VXLAN-ready fabric with Mermaid and optional deploy."""
     topology = build_evpn_vxlan_fabric(
         name,
         spine_count,
@@ -953,7 +997,7 @@ def generate_evpn_vxlan_fabric(
         host_kind,
         host_image,
     )
-    return _return_or_deploy(topology, deploy)
+    return _return_or_deploy(topology, deploy, diagram_direction)
 
 
 @mcp.tool()
@@ -967,8 +1011,9 @@ def generate_dual_plane_ai_fabric(
     host_kind: str = "linux",
     host_image: str = DEFAULT_LINUX_IMAGE,
     deploy: bool = False,
+    diagram_direction: DiagramDirection = "TB",
 ) -> Any:
-    """Generate dual A/B AI fabrics and optionally deploy after approval."""
+    """Generate dual A/B AI fabrics with Mermaid and optional deployment."""
     topology = build_dual_plane_ai_fabric(
         name,
         spines_per_plane,
@@ -979,7 +1024,7 @@ def generate_dual_plane_ai_fabric(
         host_kind,
         host_image,
     )
-    return _return_or_deploy(topology, deploy)
+    return _return_or_deploy(topology, deploy, diagram_direction)
 
 
 @mcp.tool()
@@ -990,8 +1035,9 @@ def generate_hub_spoke_wan(
     router_kind: str = "juniper_vjunosrouter",
     router_image: str = DEFAULT_VJUNOS_ROUTER_IMAGE,
     deploy: bool = False,
+    diagram_direction: DiagramDirection = "LR",
 ) -> Any:
-    """Generate a hub-and-spoke WAN and optionally deploy after approval."""
+    """Generate a hub-and-spoke WAN with Mermaid and optional deployment."""
     topology = build_hub_spoke_wan(
         name,
         hub_count,
@@ -999,7 +1045,7 @@ def generate_hub_spoke_wan(
         router_kind,
         router_image,
     )
-    return _return_or_deploy(topology, deploy)
+    return _return_or_deploy(topology, deploy, diagram_direction)
 
 
 @mcp.tool()
@@ -1015,8 +1061,9 @@ def generate_three_tier_clos(
     leaf_kind: str = "juniper_vjunosswitch",
     leaf_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
     deploy: bool = False,
+    diagram_direction: DiagramDirection = "TB",
 ) -> Any:
-    """Generate a three-tier CLOS and optionally deploy after approval."""
+    """Generate a three-tier CLOS with Mermaid and optional deployment."""
     topology = build_three_tier_clos(
         name,
         super_spine_count,
@@ -1029,7 +1076,7 @@ def generate_three_tier_clos(
         leaf_kind,
         leaf_image,
     )
-    return _return_or_deploy(topology, deploy)
+    return _return_or_deploy(topology, deploy, diagram_direction)
 
 
 def main() -> None:
