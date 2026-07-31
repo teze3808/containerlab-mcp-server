@@ -7,6 +7,7 @@ from containerlab_mcp.topologies import (
     generate_dual_plane_ai_fabric,
     generate_evpn_vxlan_fabric,
     generate_hub_spoke_wan,
+    generate_topology_preview,
     generate_three_tier_clos,
     make_two_switch_aoscx_topology,
 )
@@ -130,27 +131,69 @@ def test_topology_generators_reject_empty_names() -> None:
         generate_hub_spoke_wan("  ")
 
 
-def test_generated_topology_deploy_is_opt_in(monkeypatch) -> None:
+def test_generate_topology_preview() -> None:
+    topology = generate_branch_topology("branch1", wan_count=1, client_count=1)
+    preview = generate_topology_preview(topology)
+
+    assert preview["status"] == "preview-only"
+    assert preview["topology"] is topology
+    assert preview["diagram"]["format"] == "mermaid"
+    assert preview["diagram"]["content"].startswith("flowchart TB")
+    assert "eth1" not in preview["diagram"]["content"]
+    assert len(preview["connection_table"]) == 3
+    assert preview["connection_table"][0] == {
+        "node_a": "wan1",
+        "interface_a": "eth1",
+        "node_b": "firewall1",
+        "interface_b": "eth1",
+    }
+
+    devices = {device["node"]: device for device in preview["devices"]}
+    assert devices["wan1"]["brand"] == "Juniper"
+    assert devices["wan1"]["version"] == "26.2R1.7-nativefix"
+    assert devices["access1"]["brand"] == "Aruba"
+    assert devices["access1"]["version"] == "10.18.0001"
+
+
+def test_preview_topology_rejects_invalid_topology() -> None:
+    with pytest.raises(ValueError, match="topology object"):
+        generate_topology_preview({"name": "empty"})
+
+
+def test_mcp_topology_helper_returns_preview() -> None:
+    preview = server.generate_campus_topology(
+        "campus1",
+        core_count=1,
+        distribution_count=1,
+        access_count=1,
+    )
+
+    assert preview["status"] == "preview-only"
+    assert preview["topology"]["name"] == "campus1"
+    assert len(preview["devices"]) == 3
+
+
+def test_native_clos_mcp_generation_never_deploys(monkeypatch) -> None:
     class FakeClient:
         def __init__(self) -> None:
-            self.deployed = None
+            self.deploy = None
             self.closed = False
 
-        def deploy_topology_content(self, topology):
-            self.deployed = topology
-            return {"deployed": topology["name"]}
+        def generate_clos_topology(self, *args, **kwargs):
+            self.deploy = kwargs["deploy"]
+            return {"name": "clos1", "topology": {"nodes": {}, "links": []}}
 
         def close(self) -> None:
             self.closed = True
 
-    topology = generate_hub_spoke_wan("wan1")
     fake_client = FakeClient()
     monkeypatch.setattr(server, "get_client", lambda: fake_client)
 
-    assert server._return_or_deploy(topology, False) is topology
-    assert fake_client.deployed is None
-    assert fake_client.closed is False
+    server.generate_clos_topology(
+        "clos1",
+        [{"name": "spine", "count": 1}],
+        {"spine": "example/spine:1"},
+    )
 
-    assert server._return_or_deploy(topology, True) == {"deployed": "wan1"}
-    assert fake_client.deployed is topology
+    assert fake_client.deploy is False
     assert fake_client.closed is True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 from itertools import combinations
 from typing import Any
 
@@ -88,6 +89,105 @@ def _make_topology(
         )
 
     return {"name": name, "topology": {"nodes": nodes, "links": links}}
+
+
+def generate_topology_preview(topology: dict[str, Any]) -> dict[str, Any]:
+    """Build a review bundle without sending anything to Containerlab."""
+    topology_body = topology.get("topology")
+    if not isinstance(topology_body, dict):
+        raise ValueError("topology must contain a topology object")
+    nodes = topology_body.get("nodes")
+    links = topology_body.get("links", [])
+    if not isinstance(nodes, dict) or not nodes:
+        raise ValueError("topology must contain at least one node")
+    if not isinstance(links, list):
+        raise ValueError("topology links must be a list")
+
+    node_ids = {name: f"n{index}" for index, name in enumerate(nodes)}
+    diagram = ["flowchart TB"]
+    devices: list[dict[str, str]] = []
+    for name, attributes in nodes.items():
+        if not isinstance(attributes, dict):
+            raise ValueError(f"node attributes must be an object: {name}")
+        kind = str(attributes.get("kind", "unknown"))
+        image = str(attributes.get("image", ""))
+        devices.append(
+            {
+                "node": name,
+                "group": str(attributes.get("group", "ungrouped")),
+                "brand": _infer_brand(kind, image),
+                "kind": kind,
+                "image": image,
+                "version": _image_version(image),
+            }
+        )
+        diagram.append(f'  {node_ids[name]}["{escape(name, quote=True)}"]')
+
+    connections: list[dict[str, str]] = []
+    for link in links:
+        endpoints = link.get("endpoints") if isinstance(link, dict) else None
+        if not isinstance(endpoints, list) or len(endpoints) != 2:
+            raise ValueError("every link must contain exactly two endpoints")
+        left_node, left_interface = _split_endpoint(str(endpoints[0]))
+        right_node, right_interface = _split_endpoint(str(endpoints[1]))
+        if left_node not in node_ids or right_node not in node_ids:
+            raise ValueError("link endpoint references an unknown node")
+        connections.append(
+            {
+                "node_a": left_node,
+                "interface_a": left_interface,
+                "node_b": right_node,
+                "interface_b": right_interface,
+            }
+        )
+        diagram.append(f"  {node_ids[left_node]} --- {node_ids[right_node]}")
+
+    return {
+        "name": str(topology.get("name", "topology")),
+        "status": "preview-only",
+        "diagram": {"format": "mermaid", "content": "\n".join(diagram)},
+        "connection_table": connections,
+        "devices": devices,
+        "topology": topology,
+        "next_step": (
+            "Review this preview, then pass the topology field to "
+            "deploy_topology_content to build the lab."
+        ),
+    }
+
+
+def _split_endpoint(endpoint: str) -> tuple[str, str]:
+    if ":" not in endpoint:
+        raise ValueError(f"invalid link endpoint: {endpoint}")
+    node, interface = endpoint.rsplit(":", 1)
+    if not node or not interface:
+        raise ValueError(f"invalid link endpoint: {endpoint}")
+    return node, interface
+
+
+def _infer_brand(kind: str, image: str) -> str:
+    value = f"{kind} {image}".lower()
+    brands = (
+        (("aruba", "aoscx", "aos-cx"), "Aruba"),
+        (("juniper", "vjunos", "vsrx", "vmx", "vqfx"), "Juniper"),
+        (("arista", "ceos"), "Arista"),
+        (("cisco", "ios", "cat9kv", "n9kv", "xrv"), "Cisco"),
+        (("nokia", "srlinux", "sros"), "Nokia"),
+        (("linux", "network-multitool"), "Linux"),
+    )
+    for markers, brand in brands:
+        if any(marker in value for marker in markers):
+            return brand
+    return "Unknown"
+
+
+def _image_version(image: str) -> str:
+    if "@" in image:
+        return image.rsplit("@", 1)[1]
+    image_name = image.rsplit("/", 1)[-1]
+    if ":" in image_name:
+        return image_name.rsplit(":", 1)[1]
+    return "unspecified"
 
 
 def make_two_switch_aoscx_topology(

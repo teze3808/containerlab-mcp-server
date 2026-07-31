@@ -21,7 +21,7 @@ stop, and destroy labs without exposing unrestricted shell access.
 ## Overview
 
 `containerlab-mcp-server` wraps the official Containerlab HTTPS API and exposes
-70 focused MCP tools for lab lifecycle, command execution, configuration
+71 focused MCP tools for lab lifecycle, command execution, configuration
 artifacts, packet capture, network impairments, topology generation, remote
 access, and multi-host network stitching. Once configured, an AI assistant can
 answer requests such as:
@@ -55,7 +55,8 @@ These API server capabilities are currently exposed through MCP:
 - **Terminal Sessions:** create, inspect, and terminate constrained SSH,
   shell, and telnet sessions.
 - **Topology Tools:** generate CLOS, campus, branch, EVPN-VXLAN, dual-plane AI,
-  hub-and-spoke WAN, and two-switch topologies, plus Draw.io XML.
+  hub-and-spoke WAN, and two-switch previews with Mermaid diagrams, connection
+  tables, device inventories, and Draw.io XML.
 - **Network Tools:** inspect interfaces, apply or reset netem impairments, and
   create or delete multi-host VXLAN tunnels.
 - **Packet Capture:** inspect or manage EdgeShark and create Packetflix or
@@ -192,13 +193,14 @@ Startup configuration support uses `put_topology_file` to store the config and
 | Tool | Description |
 | --- | --- |
 | `collect_events` | Collect up to 60 seconds of native NDJSON events |
-| `generate_clos_topology` | Generate and optionally deploy a native CLOS topology |
+| `generate_clos_topology` | Generate a native CLOS topology without deployment |
 | `generate_campus_topology` | Generate a redundant core-distribution-access campus |
 | `generate_branch_topology` | Generate a dual-WAN branch with firewall, switch, and clients |
 | `generate_evpn_vxlan_fabric` | Generate a leaf-spine fabric with border leaves and hosts |
 | `generate_dual_plane_ai_fabric` | Generate isolated A/B fabrics with dual-attached AI hosts |
 | `generate_hub_spoke_wan` | Generate a single- or multi-hub routed WAN |
 | `generate_three_tier_clos` | Generate a super-spine, spine, and leaf CLOS |
+| `preview_topology` | Preview any topology with a diagram, links, brands, and image versions |
 
 ### Custom Node Templates
 
@@ -239,37 +241,45 @@ remote host.
 
 | Tool | Pattern | Deployment behavior |
 | --- | --- | --- |
-| `generate_clos_topology` | Multi-tier CLOS or leaf-spine fabric | Generate only or optionally deploy |
-| `generate_campus_topology` | Core, distribution, and dual-homed access | Generate only or optionally deploy |
-| `generate_branch_topology` | WAN routers, firewall, access switch, and clients | Generate only or optionally deploy |
-| `generate_evpn_vxlan_fabric` | Spines, leaves, border leaves, and server hosts | Generate only or optionally deploy |
-| `generate_dual_plane_ai_fabric` | Isolated A/B fabrics and dual-attached AI hosts | Generate only or optionally deploy |
-| `generate_hub_spoke_wan` | One or more hubs connected to every spoke | Generate only or optionally deploy |
-| `generate_three_tier_clos` | Super-spines, spines, and leaves | Generate only or optionally deploy |
-| `make_two_switch_aoscx_topology` | Two linked AOS-CX switches | Generate only |
+| `generate_clos_topology` | Multi-tier CLOS or leaf-spine fabric | Generate only |
+| `generate_campus_topology` | Core, distribution, and dual-homed access | Preview only |
+| `generate_branch_topology` | WAN routers, firewall, access switch, and clients | Preview only |
+| `generate_evpn_vxlan_fabric` | Spines, leaves, border leaves, and server hosts | Preview only |
+| `generate_dual_plane_ai_fabric` | Isolated A/B fabrics and dual-attached AI hosts | Preview only |
+| `generate_hub_spoke_wan` | One or more hubs connected to every spoke | Preview only |
+| `generate_three_tier_clos` | Super-spines, spines, and leaves | Preview only |
+| `make_two_switch_aoscx_topology` | Two linked AOS-CX switches | Preview only |
+| `preview_topology` | Any valid topology object | Preview only |
 | `deploy_topology_content` | Arbitrary topology object | Deploy submitted topology |
 | `deploy_on_disk_lab` | Topology YAML already stored on the API host | Deploy stored topology |
 
 `generate_clos_topology` accepts tier definitions, node kinds, runtime images,
-management addressing, naming prefixes, and an optional `deploy` flag. For
-example, two spine nodes and four leaf nodes produce eight inter-tier links.
-Keep `deploy=false` when the topology should be reviewed before any containers
-are created.
+management addressing, and naming prefixes. The MCP wrapper always sends
+`deploy=false`; pass its topology object to `preview_topology` before any
+containers are created.
 
 The six environment-specific generators allocate unique `ethN` interfaces and
-set node groups for visualization. They default to `deploy=false`; set
-`deploy=true` only after reviewing the generated topology and confirming host
-capacity and image availability. Image and kind parameters can be replaced for
-each role.
+set node groups for visualization. They are preview-only and never contact the
+Containerlab API. Each result contains:
 
-With `deploy=false`, the six environment-specific generators return the raw
-topology object for review. With `deploy=true`, they return the API deployment
-result.
+- `diagram`: a compact Mermaid network diagram.
+- `connection_table`: both endpoints and interfaces for every link.
+- `devices`: node, group, detected brand, kind, full image reference, and image
+  version.
+- `topology`: the exact object that can be submitted after review.
+
+After confirming the design, host capacity, and image availability, call
+`deploy_topology_content` with the returned `topology` field. This explicit
+second call is the deployment boundary.
 
 Image references are selected by the MCP user for each node role. Use only
 images that are installed, licensed, compatible, and already validated in the
 target Containerlab environment. The diagrams below illustrate topology roles;
 they do not require a particular image version.
+
+This MCP server has been tested only with Aruba AOS-CX and Juniper virtual
+devices. Other Containerlab kinds may work through the native API wrappers, but
+they have not been validated by this project.
 
 These helpers build nodes and links only. They do not generate VLAN, OSPF, BGP,
 EVPN-VXLAN, firewall, QoS, PFC, ECN, or RoCE configuration. Apply those
@@ -277,198 +287,116 @@ features separately with startup configurations or supported node command
 tools.
 
 The MCP client can still compose arbitrary patterns such as a ring, triangle,
-full mesh, or linear chain and submit the resulting object with
+full mesh, or linear chain. Pass the resulting object to `preview_topology`,
+review its diagram and tables, and then submit its `topology` field with
 `deploy_topology_content`.
 
 #### Campus
 
-Redundant core, distribution, and dual-homed access layers:
+Create a small core-distribution-access preview:
+
+```text
+generate_campus_topology(
+  name="campus1", core_count=1, distribution_count=1, access_count=2
+)
+```
 
 ```mermaid
 flowchart TB
-  subgraph Core
-    C1["Core 1<br/>AOS-CX"] --- C2["Core 2<br/>AOS-CX"]
-  end
-  subgraph Distribution
-    D1["Distribution 1<br/>AOS-CX"]
-    D2["Distribution 2<br/>AOS-CX"]
-  end
-  subgraph Access
-    A1["Access 1<br/>vJunos-switch"]
-    A2["Access 2<br/>vJunos-switch"]
-    A3["Access 3<br/>vJunos-switch"]
-    A4["Access 4<br/>vJunos-switch"]
-  end
-  C1 --- D1
-  C1 --- D2
-  C2 --- D1
-  C2 --- D2
-  D1 --- A1
-  D1 --- A2
-  D1 --- A3
-  D1 --- A4
-  D2 --- A1
-  D2 --- A2
-  D2 --- A3
-  D2 --- A4
+  C1["core1"] --- D1["dist1"]
+  D1 --- A1["access1"]
+  D1 --- A2["access2"]
 ```
 
 #### Branch
 
-Dual WAN routers feeding a firewall, access switch, and test clients:
+Create a minimal routed branch preview:
+
+```text
+generate_branch_topology(name="branch1", wan_count=1, client_count=1)
+```
 
 ```mermaid
-flowchart LR
-  W1["WAN 1<br/>vJunos-router"] --- F["Firewall<br/>vSRX"]
-  W2["WAN 2<br/>vJunos-router"] --- F
-  F --- S["Access<br/>AOS-CX"]
-  S --- C1["Client 1<br/>Linux"]
-  S --- C2["Client 2<br/>Linux"]
+flowchart TB
+  W1["wan1"] --- F["firewall1"]
+  F --- S["access1"]
+  S --- C1["client1"]
 ```
 
 #### EVPN-VXLAN Fabric
 
-Leaf-spine fabric with border leaves and attached server clients:
+Create a compact leaf-spine preview with two hosts:
+
+```text
+generate_evpn_vxlan_fabric(
+  name="dc1", spine_count=2, leaf_count=2,
+  border_leaf_count=0, hosts_per_leaf=1
+)
+```
 
 ```mermaid
 flowchart TB
-  subgraph Spines
-    S1["Spine 1"]
-    S2["Spine 2"]
-  end
-  subgraph Leaves
-    L1["Leaf 1"]
-    L2["Leaf 2"]
-    L3["Leaf 3"]
-    L4["Leaf 4"]
-  end
-  subgraph Border
-    B1["Border Leaf 1"]
-    B2["Border Leaf 2"]
-  end
-  subgraph Servers
-    H1["Host 1"]
-    H2["Host 2"]
-    H3["Host 3"]
-    H4["Host 4"]
-  end
-  S1 --- L1
-  S1 --- L2
-  S1 --- L3
-  S1 --- L4
-  S1 --- B1
-  S1 --- B2
-  S2 --- L1
+  S1["spine1"] --- L1["leaf1"]
+  S1 --- L2["leaf2"]
+  S2["spine2"] --- L1
   S2 --- L2
-  S2 --- L3
-  S2 --- L4
-  S2 --- B1
-  S2 --- B2
-  L1 --- H1
-  L2 --- H2
-  L3 --- H3
-  L4 --- H4
+  L1 --- H1["host1-1"]
+  L2 --- H2["host2-1"]
 ```
 
 #### Dual-Plane AI Fabric
 
-Independent A/B fabrics with every AI host attached to both planes:
+Create a small A/B fabric with two dual-attached hosts:
+
+```text
+generate_dual_plane_ai_fabric(
+  name="ai1", spines_per_plane=1, leaves_per_plane=1, host_count=2
+)
+```
 
 ```mermaid
 flowchart TB
-  subgraph Plane_A["Plane A"]
-    SA1["Spine A1"]
-    SA2["Spine A2"]
-    LA1["Leaf A1"]
-    LA2["Leaf A2"]
-    SA1 --- LA1
-    SA1 --- LA2
-    SA2 --- LA1
-    SA2 --- LA2
-  end
-  subgraph Plane_B["Plane B"]
-    SB1["Spine B1"]
-    SB2["Spine B2"]
-    LB1["Leaf B1"]
-    LB2["Leaf B2"]
-    SB1 --- LB1
-    SB1 --- LB2
-    SB2 --- LB1
-    SB2 --- LB2
-  end
-  H1["AI Host 1"]
-  H2["AI Host 2"]
-  H3["AI Host 3"]
-  H4["AI Host 4"]
-  LA1 --- H1
-  LB1 --- H1
-  LA2 --- H2
-  LB2 --- H2
-  LA1 --- H3
-  LB1 --- H3
-  LA2 --- H4
-  LB2 --- H4
+  SA["spine-a1"] --- LA["leaf-a1"]
+  SB["spine-b1"] --- LB["leaf-b1"]
+  LA --- H1["ai-host1"]
+  LB --- H1
+  LA --- H2["ai-host2"]
+  LB --- H2
 ```
 
 #### Hub-and-Spoke WAN
 
-One or more vJunos-router hubs connected to every branch spoke:
+Create a simple three-branch WAN preview:
+
+```text
+generate_hub_spoke_wan(name="wan1", hub_count=1, spoke_count=3)
+```
 
 ```mermaid
-flowchart LR
-  subgraph Hubs
-    H1["Hub 1<br/>vJunos-router"]
-    H2["Hub 2<br/>vJunos-router"]
-  end
-  subgraph Spokes
-    S1["Spoke 1<br/>vJunos-router"]
-    S2["Spoke 2<br/>vJunos-router"]
-    S3["Spoke 3<br/>vJunos-router"]
-    S4["Spoke 4<br/>vJunos-router"]
-  end
-  H1 --- S1
-  H1 --- S2
-  H1 --- S3
-  H1 --- S4
-  H2 --- S1
-  H2 --- S2
-  H2 --- S3
-  H2 --- S4
+flowchart TB
+  H1["hub1"] --- S1["spoke1"]
+  H1 --- S2["spoke2"]
+  H1 --- S3["spoke3"]
 ```
 
 #### Three-Tier CLOS
 
-Compact super-spine, spine, and leaf example; counts can be increased through
-the tool parameters:
+Create a compact three-stage preview:
+
+```text
+generate_three_tier_clos(
+  name="fabric3", super_spine_count=1, spine_count=2, leaf_count=2
+)
+```
 
 ```mermaid
 flowchart TB
-  subgraph Super_Spines["Super-Spines"]
-    SS1["Super-Spine 1"]
-    SS2["Super-Spine 2"]
-  end
-  subgraph Spines
-    S1["Spine 1"]
-    S2["Spine 2"]
-  end
-  subgraph Leaves
-    L1["Leaf 1"]
-    L2["Leaf 2"]
-    L3["Leaf 3"]
-    L4["Leaf 4"]
-  end
-  SS1 --- S1
-  SS1 --- S2
-  SS2 --- S1
-  SS2 --- S2
-  S1 --- L1
-  S1 --- L2
-  S1 --- L3
-  S1 --- L4
+  SS1["super-spine1"] --- S1["spine1"]
+  SS1 --- S2["spine2"]
+  S1 --- L1["leaf1"]
+  S1 --- L2["leaf2"]
   S2 --- L1
   S2 --- L2
-  S2 --- L3
-  S2 --- L4
 ```
 
 Example topology requests:
@@ -477,12 +405,12 @@ Example topology requests:
 Generate a CLOS topology called fabric1 with two AOS-CX spines and four
 vJunos-switch leaves. Do not deploy it.
 
-Generate a campus topology called campus1 with two core, two distribution, and
-six access switches. Use image references available in the target environment.
-Do not deploy it.
+Generate a campus topology called campus1 with one core, one distribution, and
+two access switches. Show the network diagram, connection table, device brand,
+and image version. Do not deploy it.
 
-Generate a branch called branch1 with two WAN routers, one vSRX firewall, one
-CX access switch, and three Linux clients. Show it for review.
+Generate a branch called branch1 with one WAN router, one vSRX firewall, one CX
+access switch, and one Linux client. Show the complete preview for review.
 
 Generate an EVPN-VXLAN-ready fabric called dc1 with two spines, four leaves,
 two border leaves, and one host per leaf. Do not deploy it.
@@ -523,8 +451,9 @@ List all runtime images on the lab host.
 Pull ghcr.io/srl-labs/alpine:latest.
 Create temporary SSH access to cx1 for 30 minutes.
 
-Generate a two-switch AOS-CX topology called cx-demo using eth1.
-Deploy the generated AOS-CX topology.
+Generate a two-switch AOS-CX topology called cx-demo using eth1. Show its
+diagram, connection table, brands, and image versions without deploying it.
+After I approve the preview, deploy its topology object.
 Deploy the topology stored at /home/lab/topologies/demo.clab.yml.
 Stop cx-demo while preserving its links.
 Start cx-demo and verify every node becomes healthy.
