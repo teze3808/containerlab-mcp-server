@@ -6,7 +6,20 @@ from mcp.server.fastmcp import FastMCP
 
 from .client import ContainerlabClient
 from .config import get_settings
-from .topologies import make_two_switch_aoscx_topology as make_topology
+from .topologies import (
+    DEFAULT_AOSCX_IMAGE,
+    DEFAULT_LINUX_IMAGE,
+    DEFAULT_VJUNOS_ROUTER_IMAGE,
+    DEFAULT_VJUNOS_SWITCH_IMAGE,
+    DEFAULT_VSRX_IMAGE,
+    generate_branch_topology as build_branch_topology,
+    generate_campus_topology as build_campus_topology,
+    generate_dual_plane_ai_fabric as build_dual_plane_ai_fabric,
+    generate_evpn_vxlan_fabric as build_evpn_vxlan_fabric,
+    generate_hub_spoke_wan as build_hub_spoke_wan,
+    generate_three_tier_clos as build_three_tier_clos,
+    make_two_switch_aoscx_topology as make_topology,
+)
 
 mcp = FastMCP("containerlab")
 
@@ -837,6 +850,186 @@ def make_two_switch_aoscx_topology(
 ) -> dict[str, Any]:
     """Generate a two-switch AOS-CX topology object without deploying it."""
     return make_topology(name=name, image=image, link_interface=link_interface)
+
+
+def _return_or_deploy(topology: dict[str, Any], deploy: bool) -> Any:
+    if not deploy:
+        return topology
+    client = get_client()
+    try:
+        return client.deploy_topology_content(topology)
+    finally:
+        client.close()
+
+
+@mcp.tool()
+def generate_campus_topology(
+    name: str,
+    core_count: int = 2,
+    distribution_count: int = 2,
+    access_count: int = 4,
+    core_kind: str = "aruba_aoscx",
+    core_image: str = DEFAULT_AOSCX_IMAGE,
+    distribution_kind: str = "aruba_aoscx",
+    distribution_image: str = DEFAULT_AOSCX_IMAGE,
+    access_kind: str = "juniper_vjunosswitch",
+    access_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
+    deploy: bool = False,
+) -> Any:
+    """Generate a redundant campus topology and optionally deploy after approval."""
+    topology = build_campus_topology(
+        name,
+        core_count,
+        distribution_count,
+        access_count,
+        core_kind,
+        core_image,
+        distribution_kind,
+        distribution_image,
+        access_kind,
+        access_image,
+    )
+    return _return_or_deploy(topology, deploy)
+
+
+@mcp.tool()
+def generate_branch_topology(
+    name: str,
+    wan_count: int = 2,
+    client_count: int = 2,
+    router_kind: str = "juniper_vjunosrouter",
+    router_image: str = DEFAULT_VJUNOS_ROUTER_IMAGE,
+    firewall_kind: str = "juniper_vsrx",
+    firewall_image: str = DEFAULT_VSRX_IMAGE,
+    switch_kind: str = "aruba_aoscx",
+    switch_image: str = DEFAULT_AOSCX_IMAGE,
+    client_kind: str = "linux",
+    client_image: str = DEFAULT_LINUX_IMAGE,
+    deploy: bool = False,
+) -> Any:
+    """Generate a dual-WAN branch topology and optionally deploy after approval."""
+    topology = build_branch_topology(
+        name,
+        wan_count,
+        client_count,
+        router_kind,
+        router_image,
+        firewall_kind,
+        firewall_image,
+        switch_kind,
+        switch_image,
+        client_kind,
+        client_image,
+    )
+    return _return_or_deploy(topology, deploy)
+
+
+@mcp.tool()
+def generate_evpn_vxlan_fabric(
+    name: str,
+    spine_count: int = 2,
+    leaf_count: int = 4,
+    border_leaf_count: int = 2,
+    hosts_per_leaf: int = 1,
+    spine_kind: str = "aruba_aoscx",
+    spine_image: str = DEFAULT_AOSCX_IMAGE,
+    leaf_kind: str = "juniper_vjunosswitch",
+    leaf_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
+    host_kind: str = "linux",
+    host_image: str = DEFAULT_LINUX_IMAGE,
+    deploy: bool = False,
+) -> Any:
+    """Generate an EVPN-VXLAN-ready fabric and optionally deploy after approval."""
+    topology = build_evpn_vxlan_fabric(
+        name,
+        spine_count,
+        leaf_count,
+        border_leaf_count,
+        hosts_per_leaf,
+        spine_kind,
+        spine_image,
+        leaf_kind,
+        leaf_image,
+        host_kind,
+        host_image,
+    )
+    return _return_or_deploy(topology, deploy)
+
+
+@mcp.tool()
+def generate_dual_plane_ai_fabric(
+    name: str,
+    spines_per_plane: int = 2,
+    leaves_per_plane: int = 2,
+    host_count: int = 4,
+    switch_kind: str = "aruba_aoscx",
+    switch_image: str = DEFAULT_AOSCX_IMAGE,
+    host_kind: str = "linux",
+    host_image: str = DEFAULT_LINUX_IMAGE,
+    deploy: bool = False,
+) -> Any:
+    """Generate dual A/B AI fabrics and optionally deploy after approval."""
+    topology = build_dual_plane_ai_fabric(
+        name,
+        spines_per_plane,
+        leaves_per_plane,
+        host_count,
+        switch_kind,
+        switch_image,
+        host_kind,
+        host_image,
+    )
+    return _return_or_deploy(topology, deploy)
+
+
+@mcp.tool()
+def generate_hub_spoke_wan(
+    name: str,
+    hub_count: int = 1,
+    spoke_count: int = 3,
+    router_kind: str = "juniper_vjunosrouter",
+    router_image: str = DEFAULT_VJUNOS_ROUTER_IMAGE,
+    deploy: bool = False,
+) -> Any:
+    """Generate a hub-and-spoke WAN and optionally deploy after approval."""
+    topology = build_hub_spoke_wan(
+        name,
+        hub_count,
+        spoke_count,
+        router_kind,
+        router_image,
+    )
+    return _return_or_deploy(topology, deploy)
+
+
+@mcp.tool()
+def generate_three_tier_clos(
+    name: str,
+    super_spine_count: int = 2,
+    spine_count: int = 4,
+    leaf_count: int = 8,
+    super_spine_kind: str = "aruba_aoscx",
+    super_spine_image: str = DEFAULT_AOSCX_IMAGE,
+    spine_kind: str = "aruba_aoscx",
+    spine_image: str = DEFAULT_AOSCX_IMAGE,
+    leaf_kind: str = "juniper_vjunosswitch",
+    leaf_image: str = DEFAULT_VJUNOS_SWITCH_IMAGE,
+    deploy: bool = False,
+) -> Any:
+    """Generate a three-tier CLOS and optionally deploy after approval."""
+    topology = build_three_tier_clos(
+        name,
+        super_spine_count,
+        spine_count,
+        leaf_count,
+        super_spine_kind,
+        super_spine_image,
+        spine_kind,
+        spine_image,
+        leaf_kind,
+        leaf_image,
+    )
+    return _return_or_deploy(topology, deploy)
 
 
 def main() -> None:

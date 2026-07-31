@@ -21,7 +21,7 @@ stop, and destroy labs without exposing unrestricted shell access.
 ## Overview
 
 `containerlab-mcp-server` wraps the official Containerlab HTTPS API and exposes
-64 focused MCP tools for lab lifecycle, command execution, configuration
+70 focused MCP tools for lab lifecycle, command execution, configuration
 artifacts, packet capture, network impairments, topology generation, remote
 access, and multi-host network stitching. Once configured, an AI assistant can
 answer requests such as:
@@ -54,8 +54,8 @@ These API server capabilities are currently exposed through MCP:
   sessions.
 - **Terminal Sessions:** create, inspect, and terminate constrained SSH,
   shell, and telnet sessions.
-- **Topology Tools:** generate CLOS topologies, generate Draw.io XML, and build
-  a two-switch AOS-CX topology object.
+- **Topology Tools:** generate CLOS, campus, branch, EVPN-VXLAN, dual-plane AI,
+  hub-and-spoke WAN, and two-switch topologies, plus Draw.io XML.
 - **Network Tools:** inspect interfaces, apply or reset netem impairments, and
   create or delete multi-host VXLAN tunnels.
 - **Packet Capture:** inspect or manage EdgeShark and create Packetflix or
@@ -193,6 +193,12 @@ Startup configuration support uses `put_topology_file` to store the config and
 | --- | --- |
 | `collect_events` | Collect up to 60 seconds of native NDJSON events |
 | `generate_clos_topology` | Generate and optionally deploy a native CLOS topology |
+| `generate_campus_topology` | Generate a redundant core-distribution-access campus |
+| `generate_branch_topology` | Generate a dual-WAN branch with firewall, switch, and clients |
+| `generate_evpn_vxlan_fabric` | Generate a leaf-spine fabric with border leaves and hosts |
+| `generate_dual_plane_ai_fabric` | Generate isolated A/B fabrics with dual-attached AI hosts |
+| `generate_hub_spoke_wan` | Generate a single- or multi-hub routed WAN |
+| `generate_three_tier_clos` | Generate a super-spine, spine, and leaf CLOS |
 
 ### Custom Node Templates
 
@@ -234,6 +240,12 @@ remote host.
 | Tool | Pattern | Deployment behavior |
 | --- | --- | --- |
 | `generate_clos_topology` | Multi-tier CLOS or leaf-spine fabric | Generate only or optionally deploy |
+| `generate_campus_topology` | Core, distribution, and dual-homed access | Generate only or optionally deploy |
+| `generate_branch_topology` | WAN routers, firewall, access switch, and clients | Generate only or optionally deploy |
+| `generate_evpn_vxlan_fabric` | Spines, leaves, border leaves, and server hosts | Generate only or optionally deploy |
+| `generate_dual_plane_ai_fabric` | Isolated A/B fabrics and dual-attached AI hosts | Generate only or optionally deploy |
+| `generate_hub_spoke_wan` | One or more hubs connected to every spoke | Generate only or optionally deploy |
+| `generate_three_tier_clos` | Super-spines, spines, and leaves | Generate only or optionally deploy |
 | `make_two_switch_aoscx_topology` | Two linked AOS-CX switches | Generate only |
 | `deploy_topology_content` | Arbitrary topology object | Deploy submitted topology |
 | `deploy_on_disk_lab` | Topology YAML already stored on the API host | Deploy stored topology |
@@ -248,10 +260,25 @@ are created.
 `vrnetlab/aruba_arubaos-cx:10.17.1010`. Pass a different image tag when
 required by your environment.
 
-The MCP client can also compose common patterns such as a ring, triangle, full
-mesh, linear chain, or hub-and-spoke topology and submit the resulting object
-with `deploy_topology_content`. These patterns use the general deployment tool;
-they are not separate native `clab-api-server` endpoints.
+The six environment-specific generators allocate unique `ethN` interfaces and
+set node groups for visualization. They default to `deploy=false`; set
+`deploy=true` only after reviewing the generated topology and confirming host
+capacity and image availability. Image and kind parameters can be replaced for
+each role.
+
+The default role images are AOS-CX `10.18.0001`, vJunos-switch and
+vJunos-router `26.2R1.7-nativefix`, vSRX `26.2R1.7`, and the public
+`ghcr.io/srl-labs/network-multitool:latest` Linux client. Override any default
+that is not installed or validated in your environment.
+
+These helpers build nodes and links only. They do not generate VLAN, OSPF, BGP,
+EVPN-VXLAN, firewall, QoS, PFC, ECN, or RoCE configuration. Apply those
+features separately with startup configurations or supported node command
+tools.
+
+The MCP client can still compose arbitrary patterns such as a ring, triangle,
+full mesh, or linear chain and submit the resulting object with
+`deploy_topology_content`.
 
 Example topology requests:
 
@@ -259,14 +286,32 @@ Example topology requests:
 Generate a CLOS topology called fabric1 with two AOS-CX spines and four
 vJunos-switch leaves. Do not deploy it.
 
+Generate a campus topology called campus1 with two core, two distribution, and
+six access switches. Use the installed CX and vJunos-switch images. Do not
+deploy it.
+
+Generate a branch called branch1 with two WAN routers, one vSRX firewall, one
+CX access switch, and three Linux clients. Show it for review.
+
+Generate an EVPN-VXLAN-ready fabric called dc1 with two spines, four leaves,
+two border leaves, and one host per leaf. Do not deploy it.
+
+Generate a dual-plane AI fabric called ai1 with two spines and four leaves per
+plane plus eight dual-attached hosts. Do not deploy it.
+
+Generate a redundant WAN called wan1 with two hubs and six spokes. Show the
+topology before deployment.
+
+Generate a three-tier CLOS called fabric3 with two super-spines, four spines,
+and eight leaves. Do not deploy it.
+
 Generate a four-node AOS-CX ring using eth1 and eth2. Show the topology object
 for review before deployment.
 
 Create a triangle with one AOS-CX switch, one vJunos-switch, and one Linux
 client. Connect every node to the other two nodes.
 
-Create a hub-and-spoke lab with one router hub and three Linux clients, then
-deploy the topology.
+Create a linear lab with four routers and show the topology before deployment.
 ```
 
 ## Example Questions
