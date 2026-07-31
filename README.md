@@ -689,7 +689,7 @@ client. Connect every node to the other two nodes.
 Create a linear lab with four routers and show the topology before deployment.
 ```
 
-## Example Questions
+## Example Prompts
 
 Try these in an MCP-capable AI client:
 
