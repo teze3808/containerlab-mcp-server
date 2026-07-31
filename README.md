@@ -277,10 +277,11 @@ Each environment-specific generator returns a bundle with:
 - `deployment`: the API deployment result, present only when `deploy=true`.
 
 The deployment path sends only `topology` to `clab-api-server`; diagram metadata
-is never included in the Containerlab payload. Diagram direction can be `TB`,
-`LR`, `BT`, or `RL`. Use `generate_topology_diagram` to visualize a topology
-from `generate_clos_topology`, topology YAML converted to an object, or any
-custom topology assembled by the MCP client.
+is never included in the Containerlab payload. Diagram direction changes only
+the drawing layout: `TB` is top-to-bottom, `LR` is left-to-right, `BT` is
+bottom-to-top, and `RL` is right-to-left. Use `generate_topology_diagram` to
+visualize a topology from `generate_clos_topology`, topology YAML converted to
+an object, or any custom topology assembled by the MCP client.
 
 The default role images are AOS-CX `10.18.0001`, vJunos-switch and
 vJunos-router `26.2R1.7-nativefix`, vSRX `26.2R1.7`, and the public
@@ -295,6 +296,197 @@ tools.
 The MCP client can still compose arbitrary patterns such as a ring, triangle,
 full mesh, or linear chain and submit the resulting object with
 `deploy_topology_content`.
+
+#### Campus
+
+Redundant core, distribution, and dual-homed access layers:
+
+```mermaid
+flowchart TB
+  subgraph Core
+    C1["Core 1<br/>AOS-CX"] --- C2["Core 2<br/>AOS-CX"]
+  end
+  subgraph Distribution
+    D1["Distribution 1<br/>AOS-CX"]
+    D2["Distribution 2<br/>AOS-CX"]
+  end
+  subgraph Access
+    A1["Access 1<br/>vJunos-switch"]
+    A2["Access 2<br/>vJunos-switch"]
+    A3["Access 3<br/>vJunos-switch"]
+    A4["Access 4<br/>vJunos-switch"]
+  end
+  C1 --- D1
+  C1 --- D2
+  C2 --- D1
+  C2 --- D2
+  D1 --- A1
+  D1 --- A2
+  D1 --- A3
+  D1 --- A4
+  D2 --- A1
+  D2 --- A2
+  D2 --- A3
+  D2 --- A4
+```
+
+#### Branch
+
+Dual WAN routers feeding a firewall, access switch, and test clients:
+
+```mermaid
+flowchart LR
+  W1["WAN 1<br/>vJunos-router"] --- F["Firewall<br/>vSRX"]
+  W2["WAN 2<br/>vJunos-router"] --- F
+  F --- S["Access<br/>AOS-CX"]
+  S --- C1["Client 1<br/>Linux"]
+  S --- C2["Client 2<br/>Linux"]
+```
+
+#### EVPN-VXLAN Fabric
+
+Leaf-spine fabric with border leaves and attached server clients:
+
+```mermaid
+flowchart TB
+  subgraph Spines
+    S1["Spine 1"]
+    S2["Spine 2"]
+  end
+  subgraph Leaves
+    L1["Leaf 1"]
+    L2["Leaf 2"]
+    L3["Leaf 3"]
+    L4["Leaf 4"]
+  end
+  subgraph Border
+    B1["Border Leaf 1"]
+    B2["Border Leaf 2"]
+  end
+  subgraph Servers
+    H1["Host 1"]
+    H2["Host 2"]
+    H3["Host 3"]
+    H4["Host 4"]
+  end
+  S1 --- L1
+  S1 --- L2
+  S1 --- L3
+  S1 --- L4
+  S1 --- B1
+  S1 --- B2
+  S2 --- L1
+  S2 --- L2
+  S2 --- L3
+  S2 --- L4
+  S2 --- B1
+  S2 --- B2
+  L1 --- H1
+  L2 --- H2
+  L3 --- H3
+  L4 --- H4
+```
+
+#### Dual-Plane AI Fabric
+
+Independent A/B fabrics with every AI host attached to both planes:
+
+```mermaid
+flowchart TB
+  subgraph Plane_A["Plane A"]
+    SA1["Spine A1"]
+    SA2["Spine A2"]
+    LA1["Leaf A1"]
+    LA2["Leaf A2"]
+    SA1 --- LA1
+    SA1 --- LA2
+    SA2 --- LA1
+    SA2 --- LA2
+  end
+  subgraph Plane_B["Plane B"]
+    SB1["Spine B1"]
+    SB2["Spine B2"]
+    LB1["Leaf B1"]
+    LB2["Leaf B2"]
+    SB1 --- LB1
+    SB1 --- LB2
+    SB2 --- LB1
+    SB2 --- LB2
+  end
+  H1["AI Host 1"]
+  H2["AI Host 2"]
+  H3["AI Host 3"]
+  H4["AI Host 4"]
+  LA1 --- H1
+  LB1 --- H1
+  LA2 --- H2
+  LB2 --- H2
+  LA1 --- H3
+  LB1 --- H3
+  LA2 --- H4
+  LB2 --- H4
+```
+
+#### Hub-and-Spoke WAN
+
+One or more vJunos-router hubs connected to every branch spoke:
+
+```mermaid
+flowchart LR
+  subgraph Hubs
+    H1["Hub 1<br/>vJunos-router"]
+    H2["Hub 2<br/>vJunos-router"]
+  end
+  subgraph Spokes
+    S1["Spoke 1<br/>vJunos-router"]
+    S2["Spoke 2<br/>vJunos-router"]
+    S3["Spoke 3<br/>vJunos-router"]
+    S4["Spoke 4<br/>vJunos-router"]
+  end
+  H1 --- S1
+  H1 --- S2
+  H1 --- S3
+  H1 --- S4
+  H2 --- S1
+  H2 --- S2
+  H2 --- S3
+  H2 --- S4
+```
+
+#### Three-Tier CLOS
+
+Compact super-spine, spine, and leaf example; counts can be increased through
+the tool parameters:
+
+```mermaid
+flowchart TB
+  subgraph Super_Spines["Super-Spines"]
+    SS1["Super-Spine 1"]
+    SS2["Super-Spine 2"]
+  end
+  subgraph Spines
+    S1["Spine 1"]
+    S2["Spine 2"]
+  end
+  subgraph Leaves
+    L1["Leaf 1"]
+    L2["Leaf 2"]
+    L3["Leaf 3"]
+    L4["Leaf 4"]
+  end
+  SS1 --- S1
+  SS1 --- S2
+  SS2 --- S1
+  SS2 --- S2
+  S1 --- L1
+  S1 --- L2
+  S1 --- L3
+  S1 --- L4
+  S2 --- L1
+  S2 --- L2
+  S2 --- L3
+  S2 --- L4
+```
 
 Example topology requests:
 
