@@ -35,7 +35,7 @@ answer requests such as:
 
 ## Architecture
 
-![Animated containerlab-mcp-server architecture](docs/architecture.gif)
+![Animated Containerlab MCP request flow](docs/containerlab-mcp-flow.svg)
 
 The MCP server runs locally with the AI client. It authenticates to
 `clab-api-server`, caches the returned bearer token for up to one hour, and
