@@ -293,12 +293,12 @@ review its diagram and tables, and then submit its `topology` field with
 
 #### Campus
 
-Create a small core-distribution-access preview:
+Example prompt:
 
 ```text
-generate_campus_topology(
-  name="campus1", core_count=1, distribution_count=1, access_count=2
-)
+Create a campus lab called campus1 with one core switch, one distribution
+switch, and two access switches. Do not deploy it. Show the network diagram,
+connection table, device brands, and image versions for review.
 ```
 
 ```mermaid
@@ -310,10 +310,12 @@ flowchart TB
 
 #### Branch
 
-Create a minimal routed branch preview:
+Example prompt:
 
 ```text
-generate_branch_topology(name="branch1", wan_count=1, client_count=1)
+Create a branch lab called branch1 with one WAN router, one firewall, one access
+switch, and one Linux client. Do not deploy it. Show the network diagram,
+connection table, device brands, and image versions for review.
 ```
 
 ```mermaid
@@ -325,13 +327,12 @@ flowchart TB
 
 #### EVPN-VXLAN Fabric
 
-Create a compact leaf-spine preview with two hosts:
+Example prompt:
 
 ```text
-generate_evpn_vxlan_fabric(
-  name="dc1", spine_count=2, leaf_count=2,
-  border_leaf_count=0, hosts_per_leaf=1
-)
+Create an EVPN-VXLAN fabric called dc1 with two spine switches, two leaf
+switches, no border leaves, and one Linux host on each leaf. Do not deploy it.
+Show the network diagram, connection table, device brands, and image versions.
 ```
 
 ```mermaid
@@ -346,12 +347,12 @@ flowchart TB
 
 #### Dual-Plane AI Fabric
 
-Create a small A/B fabric with two dual-attached hosts:
+Example prompt:
 
 ```text
-generate_dual_plane_ai_fabric(
-  name="ai1", spines_per_plane=1, leaves_per_plane=1, host_count=2
-)
+Create a dual-plane AI fabric called ai1 with one spine and one leaf in each
+plane, plus two hosts connected to both planes. Do not deploy it. Show the
+network diagram, connection table, device brands, and image versions.
 ```
 
 ```mermaid
@@ -366,10 +367,12 @@ flowchart TB
 
 #### Hub-and-Spoke WAN
 
-Create a simple three-branch WAN preview:
+Example prompt:
 
 ```text
-generate_hub_spoke_wan(name="wan1", hub_count=1, spoke_count=3)
+Create a hub-and-spoke WAN called wan1 with one hub router and three spoke
+routers. Do not deploy it. Show the network diagram, connection table, device
+brands, and image versions for review.
 ```
 
 ```mermaid
@@ -381,12 +384,12 @@ flowchart TB
 
 #### Three-Tier CLOS
 
-Create a compact three-stage preview:
+Example prompt:
 
 ```text
-generate_three_tier_clos(
-  name="fabric3", super_spine_count=1, spine_count=2, leaf_count=2
-)
+Create a three-tier CLOS called fabric3 with one super-spine, two spine
+switches, and two leaf switches. Do not deploy it. Show the network diagram,
+connection table, device brands, and image versions for review.
 ```
 
 ```mermaid
