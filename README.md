@@ -299,15 +299,53 @@ Create a VXLAN with VNI 100 from cx1-eth1 to remote host 192.0.2.20.
 
 ## Prerequisites
 
-- Python 3.11 or newer
-- [`uv`](https://docs.astral.sh/uv/)
-- An accessible
-  [Containerlab API Server](https://containerlab.dev/manual/api-server/)
-- A Containerlab API user with permission to access the required labs
-- Docker images for every node referenced by submitted topologies
+### Containerlab Host
 
-The MCP server does not build or pull private network operating system images
-for you. Prepare those images on the Containerlab host first.
+- A Linux host with Containerlab installed and working independently of this
+  MCP server.
+- A supported container runtime, normally Docker, with sufficient CPU, memory,
+  disk space, and network permissions for the intended labs.
+- KVM support when using VM-based images such as vrnetlab appliances. If the
+  Containerlab host is itself a virtual machine, nested virtualization must
+  also be enabled.
+- The official
+  [Containerlab API Server](https://containerlab.dev/manual/api-server/)
+  installed, configured, and reachable over HTTPS from the MCP client host.
+- A Containerlab API user with permission to access the required labs and any
+  privileged API operations that will be used.
+
+### Network Images
+
+- Every image referenced by a topology must already exist in the Containerlab
+  host's runtime or be available from a registry that the runtime can access.
+- Private vendor images must be obtained under the appropriate vendor license,
+  converted when required, and imported into the runtime before MCP deployment.
+- Each image must be compatible with the installed Containerlab and vrnetlab
+  versions, the host CPU architecture, and the selected Containerlab node kind.
+  Check the
+  [vrnetlab compatibility matrix](https://containerlab.dev/manual/vrnetlab/#compatibility-matrix)
+  when selecting versions.
+- VM-based images must be able to access `/dev/kvm` and fit within the host's
+  available CPU and memory.
+- Validate each image with a small direct Containerlab deployment first. It
+  should boot, become healthy, and accept its expected management login before
+  using it in an MCP-generated topology.
+
+> [!IMPORTANT]
+>
+> This MCP server controls an existing, working Containerlab environment. It
+> does not convert network operating system images, enable virtualization,
+> install vendor licenses, or make an incompatible image bootable. If an image
+> cannot run in Containerlab directly, deploying the same image through MCP
+> will also fail.
+
+### MCP Client Host
+
+- Python 3.11 or newer.
+- [`uv`](https://docs.astral.sh/uv/).
+- An MCP-capable client such as Codex, Claude Desktop, Claude Code, or Visual
+  Studio Code with GitHub Copilot.
+- Network and certificate access to the configured `CLAB_API_URL`.
 
 ## Setup
 
