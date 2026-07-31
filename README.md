@@ -259,10 +259,6 @@ example, two spine nodes and four leaf nodes produce eight inter-tier links.
 Keep `deploy=false` when the topology should be reviewed before any containers
 are created.
 
-`make_two_switch_aoscx_topology` defaults to
-`vrnetlab/aruba_arubaos-cx:10.17.1010`. Pass a different image tag when
-required by your environment.
-
 The six environment-specific generators allocate unique `ethN` interfaces and
 set node groups for visualization. They default to `deploy=false`; set
 `deploy=true` only after reviewing the generated topology and confirming host
@@ -283,10 +279,10 @@ bottom-to-top, and `RL` is right-to-left. Use `generate_topology_diagram` to
 visualize a topology from `generate_clos_topology`, topology YAML converted to
 an object, or any custom topology assembled by the MCP client.
 
-The default role images are AOS-CX `10.18.0001`, vJunos-switch and
-vJunos-router `26.2R1.7-nativefix`, vSRX `26.2R1.7`, and the public
-`ghcr.io/srl-labs/network-multitool:latest` Linux client. Override any default
-that is not installed or validated in your environment.
+Image references are selected by the MCP user for each node role. Use only
+images that are installed, licensed, compatible, and already validated in the
+target Containerlab environment. The diagrams below illustrate topology roles;
+they do not require a particular image version.
 
 These helpers build nodes and links only. They do not generate VLAN, OSPF, BGP,
 EVPN-VXLAN, firewall, QoS, PFC, ECN, or RoCE configuration. Apply those
@@ -495,8 +491,8 @@ Generate a CLOS topology called fabric1 with two AOS-CX spines and four
 vJunos-switch leaves. Do not deploy it.
 
 Generate a campus topology called campus1 with two core, two distribution, and
-six access switches. Use the installed CX and vJunos-switch images. Do not
-deploy it. Display the returned Mermaid diagram.
+six access switches. Use image references available in the target environment.
+Do not deploy it. Display the returned Mermaid diagram.
 
 Generate a branch called branch1 with two WAN routers, one vSRX firewall, one
 CX access switch, and three Linux clients. Show it for review.
