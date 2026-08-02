@@ -10,9 +10,6 @@ Community MCP server for managing Containerlab environments through the official
 Containerlab API Server. It lets MCP-capable AI clients inspect, deploy, start,
 stop, and destroy labs without exposing unrestricted shell access.
 
-The project also includes a lightweight command-line MCP client for direct tool
-discovery and testing without an AI agent.
-
 > [!WARNING]
 >
 > This is an unofficial and unsupported community project. It is not affiliated
@@ -803,7 +800,7 @@ certificate trusted by the MCP client host.
 ## Run Locally
 
 ```bash
-uv run --env-file .env containerlab-mcp
+uv run containerlab-mcp
 ```
 
 Run the test suite:
@@ -811,50 +808,6 @@ Run the test suite:
 ```bash
 uv run pytest
 ```
-
-## Lightweight MCP Client
-
-`containerlab-mcp-client` is a small, non-AI test client included with this
-project. Each invocation starts the local stdio MCP server, performs one
-operation, prints the response, and exits. It does not run a persistent daemon.
-
-List every available MCP tool:
-
-```bash
-uv run --env-file .env containerlab-mcp-client tools
-```
-
-Include each tool's JSON input schema:
-
-```bash
-uv run --env-file .env containerlab-mcp-client tools --schemas
-```
-
-Call a read-only API tool:
-
-```bash
-uv run --env-file .env containerlab-mcp-client call health
-```
-
-Generate a preview without contacting the Containerlab API:
-
-```bash
-uv run --env-file .env containerlab-mcp-client call generate_lacp_topology \
-  --arguments '{"name":"lag-demo","member_link_count":2}'
-```
-
-Pass tool arguments as one JSON object. Add `--json` before the subcommand to
-print the complete MCP response envelope, or `--verbose` to show diagnostics
-from the server process:
-
-```bash
-uv run --env-file .env containerlab-mcp-client --json call list_labs
-uv run --env-file .env containerlab-mcp-client --verbose tools
-```
-
-The client exposes every MCP tool, including destructive operations. Review
-the tool name and arguments before calling deployment, deletion, lifecycle,
-configuration, image, impairment, capture, or VXLAN tools.
 
 ## MCP Client Configuration
 
