@@ -831,6 +831,96 @@ CLAB_TIMEOUT = "60"
 
 Restart Codex after editing the configuration.
 
+### Hermes Agent
+
+Install [Hermes Agent](https://github.com/NousResearch/hermes-agent) on Linux,
+macOS, or WSL2 using its official installer. Review downloaded scripts first
+when required by your security policy.
+
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash
+source ~/.zshrc  # use ~/.bashrc when running Bash
+hermes setup
+hermes doctor
+```
+
+For native Windows, run the official installer in PowerShell:
+
+```powershell
+iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+hermes setup
+hermes doctor
+```
+
+The standard installer includes MCP support. For a minimal or manual Hermes
+installation, add it separately:
+
+```bash
+cd ~/.hermes/hermes-agent
+uv pip install -e ".[mcp]"
+```
+
+Complete this project's [Setup](#setup) first. Then store the Containerlab API
+credentials in `~/.hermes/.env`:
+
+```env
+CLAB_API_URL=https://containerlab-host.example:8090
+CLAB_USERNAME=your-username
+CLAB_PASSWORD=your-password
+CLAB_VERIFY_TLS=false
+CLAB_TIMEOUT=60
+```
+
+Protect the credentials file:
+
+```bash
+chmod 600 ~/.hermes/.env
+```
+
+Add the stdio server to `~/.hermes/config.yaml`, replacing the project path.
+If `mcp_servers` already exists, merge only the `containerlab` entry beneath
+it instead of creating a second `mcp_servers` key.
+
+```yaml
+mcp_servers:
+  containerlab:
+    command: "uv"
+    args:
+      - "run"
+      - "--directory"
+      - "/path/to/containerlab-mcp-server"
+      - "containerlab-mcp"
+    env:
+      CLAB_API_URL: "${CLAB_API_URL}"
+      CLAB_USERNAME: "${CLAB_USERNAME}"
+      CLAB_PASSWORD: "${CLAB_PASSWORD}"
+      CLAB_VERIFY_TLS: "${CLAB_VERIFY_TLS}"
+      CLAB_TIMEOUT: "${CLAB_TIMEOUT}"
+    enabled: true
+    timeout: 120
+    connect_timeout: 60
+```
+
+Hermes resolves `${VAR}` references from `~/.hermes/.env`. Start Hermes and
+verify that it discovers the Containerlab tools:
+
+```bash
+hermes mcp list
+hermes chat
+```
+
+After changing MCP configuration in a running session, enter `/reload-mcp`.
+Try this prompt:
+
+```text
+Check the Containerlab API health, list the available runtime images, and show
+all labs. Do not deploy, stop, or destroy anything.
+```
+
+See the official
+[Hermes MCP documentation](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/mcp.md)
+for tool filtering, timeouts, and troubleshooting.
+
 ### Claude Desktop
 
 Add this server entry to the Claude Desktop MCP configuration:
