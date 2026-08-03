@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import inspect
+from functools import wraps
 from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
+from .approvals import ACTION_SPECS, ApprovalStore
 from .client import ContainerlabClient
 from .config import get_settings
 from .topologies import (
@@ -28,8 +31,99 @@ from .topologies import (
 mcp = FastMCP("containerlab")
 
 
+def direct_write(
+    action: str,
+    *,
+    raw_command: bool = False,
+    shell_capable: bool = False,
+):
+    """Block direct mutations unless the operator explicitly disables safe mode."""
+
+    def decorator(function):
+        @wraps(function)
+        def wrapped(*args, **kwargs):
+            settings = get_settings()
+            if settings.safe_mode:
+                raise RuntimeError(
+                    f"Direct action {action!r} is disabled by CLAB_SAFE_MODE. "
+                    "Use create_change_plan, approve_change, and "
+                    "execute_approved_change."
+                )
+            if raw_command and not settings.allow_raw_commands:
+                raise RuntimeError(
+                    "Raw command execution requires CLAB_ALLOW_RAW_COMMANDS=true"
+                )
+            if shell_capable:
+                bound = inspect.signature(function).bind_partial(*args, **kwargs)
+                if (
+                    bound.arguments.get("protocol") == "shell"
+                    and not settings.allow_shell_terminal
+                ):
+                    raise RuntimeError(
+                        "Shell terminal sessions require "
+                        "CLAB_ALLOW_SHELL_TERMINAL=true"
+                    )
+            return function(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 def get_client() -> ContainerlabClient:
     return ContainerlabClient(get_settings())
+
+
+@mcp.tool()
+def list_change_actions() -> dict[str, Any]:
+    """List state-changing actions available to the approval workflow."""
+    return {
+        name: {
+            "risk": spec.risk,
+            "raw_command": spec.raw_command,
+            "shell_capable": spec.shell_capable,
+        }
+        for name, spec in sorted(ACTION_SPECS.items())
+    }
+
+
+@mcp.tool()
+def create_change_plan(
+    action: str,
+    arguments: dict[str, Any],
+    reason: str,
+) -> dict[str, Any]:
+    """Validate and store a proposed state-changing action without executing it."""
+    if not reason.strip():
+        raise ValueError("reason is required")
+    if len(reason) > 1000:
+        raise ValueError("reason must be at most 1000 characters")
+    return ApprovalStore(get_settings()).create_plan(action, arguments, reason)
+
+
+@mcp.tool()
+def approve_change(
+    plan_id: str,
+    confirmation: Literal["approve"],
+) -> dict[str, Any]:
+    """Approve one reviewed plan after explicit human confirmation."""
+    if confirmation != "approve":
+        raise ValueError("confirmation must be 'approve'")
+    return ApprovalStore(get_settings()).approve(plan_id)
+
+
+@mcp.tool()
+def execute_approved_change(
+    plan_id: str,
+    approval_id: str,
+    idempotency_key: str,
+) -> dict[str, Any]:
+    """Execute one approved plan once and return downstream evidence."""
+    return ApprovalStore(get_settings()).execute(
+        plan_id,
+        approval_id,
+        idempotency_key,
+    )
 
 
 @mcp.tool()
@@ -136,6 +230,7 @@ def get_node_browser_ports(lab_name: str, node_name: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("execute_lab_command", raw_command=True)
 def execute_lab_command(
     lab_name: str,
     command: str,
@@ -154,6 +249,7 @@ def execute_lab_command(
 
 
 @mcp.tool()
+@direct_write("execute_node_command", raw_command=True)
 def execute_node_command(lab_name: str, node_name: str, command: str) -> Any:
     """Execute a native container command on one node. Confirm mutating commands first."""
     client = get_client()
@@ -164,6 +260,7 @@ def execute_node_command(lab_name: str, node_name: str, command: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("execute_node_command", raw_command=True)
 def validate_node_command(
     lab_name: str,
     node_name: str,
@@ -184,6 +281,7 @@ def validate_node_command(
 
 
 @mcp.tool()
+@direct_write("save_lab_config")
 def save_lab_config(lab_name: str, node_name: str | None = None) -> Any:
     """Save running configurations for all supported nodes or one named node."""
     client = get_client()
@@ -194,6 +292,7 @@ def save_lab_config(lab_name: str, node_name: str | None = None) -> Any:
 
 
 @mcp.tool()
+@direct_write("start_lab")
 def start_lab(lab_name: str, include_logs: bool = True) -> Any:
     """Start all stopped nodes in a deployed lab."""
     client = get_client()
@@ -204,6 +303,7 @@ def start_lab(lab_name: str, include_logs: bool = True) -> Any:
 
 
 @mcp.tool()
+@direct_write("stop_lab")
 def stop_lab(lab_name: str, include_logs: bool = True) -> Any:
     """Stop all nodes in a deployed lab while preserving dataplane links."""
     client = get_client()
@@ -214,6 +314,7 @@ def stop_lab(lab_name: str, include_logs: bool = True) -> Any:
 
 
 @mcp.tool()
+@direct_write("start_node")
 def start_node(lab_name: str, node_name: str) -> Any:
     """Start one stopped node while preserving the rest of the lab."""
     client = get_client()
@@ -224,6 +325,7 @@ def start_node(lab_name: str, node_name: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("stop_node")
 def stop_node(lab_name: str, node_name: str) -> Any:
     """Stop one running node while preserving its dataplane links."""
     client = get_client()
@@ -234,6 +336,7 @@ def stop_node(lab_name: str, node_name: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("restart_node")
 def restart_node(lab_name: str, node_name: str) -> Any:
     """Restart one node while preserving its dataplane links."""
     client = get_client()
@@ -244,6 +347,7 @@ def restart_node(lab_name: str, node_name: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("pause_node")
 def pause_node(lab_name: str, node_name: str) -> Any:
     """Pause one running node."""
     client = get_client()
@@ -254,6 +358,7 @@ def pause_node(lab_name: str, node_name: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("unpause_node")
 def unpause_node(lab_name: str, node_name: str) -> Any:
     """Resume one paused node."""
     client = get_client()
@@ -264,6 +369,7 @@ def unpause_node(lab_name: str, node_name: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("deploy_on_disk_lab")
 def deploy_on_disk_lab(
     lab_name: str,
     topology_path: str | None = None,
@@ -284,6 +390,7 @@ def deploy_on_disk_lab(
 
 
 @mcp.tool()
+@direct_write("deploy_topology_content")
 def deploy_topology_content(
     topology: dict[str, Any],
     lab_name_override: str | None = None,
@@ -302,6 +409,7 @@ def deploy_topology_content(
 
 
 @mcp.tool()
+@direct_write("destroy_lab")
 def destroy_lab(
     lab_name: str,
     cleanup: bool = False,
@@ -332,6 +440,7 @@ def list_images() -> Any:
 
 
 @mcp.tool()
+@direct_write("pull_image")
 def pull_image(image: str) -> Any:
     """Pull a public or pre-authorized runtime image by reference."""
     client = get_client()
@@ -342,6 +451,7 @@ def pull_image(image: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("delete_image")
 def delete_image(reference: str, force: bool = False) -> Any:
     """Delete a runtime image after explicit user approval. This is destructive."""
     client = get_client()
@@ -376,6 +486,7 @@ def get_edgeshark_status() -> Any:
 
 
 @mcp.tool()
+@direct_write("install_edgeshark")
 def install_edgeshark() -> Any:
     """Install and start EdgeShark. Requires API superuser and explicit approval."""
     client = get_client()
@@ -386,6 +497,7 @@ def install_edgeshark() -> Any:
 
 
 @mcp.tool()
+@direct_write("uninstall_edgeshark")
 def uninstall_edgeshark() -> Any:
     """Uninstall EdgeShark. Requires API superuser and explicit approval."""
     client = get_client()
@@ -414,6 +526,7 @@ def build_packetflix_capture(
 
 
 @mcp.tool()
+@direct_write("create_wireshark_capture_sessions")
 def create_wireshark_capture_sessions(
     lab_name: str,
     targets: list[dict[str, str]],
@@ -442,6 +555,7 @@ def get_capture_session_ready(session_id: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("terminate_capture_session")
 def terminate_capture_session(session_id: str) -> Any:
     """Terminate one Wireshark capture session after explicit approval."""
     client = get_client()
@@ -452,6 +566,7 @@ def terminate_capture_session(session_id: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("terminate_all_capture_sessions")
 def terminate_all_capture_sessions() -> Any:
     """Terminate all visible Wireshark capture sessions after explicit approval."""
     client = get_client()
@@ -462,6 +577,7 @@ def terminate_all_capture_sessions() -> Any:
 
 
 @mcp.tool()
+@direct_write("request_ssh_access")
 def request_ssh_access(
     lab_name: str,
     node_name: str,
@@ -492,6 +608,7 @@ def list_ssh_sessions(all_sessions: bool = False) -> Any:
 
 
 @mcp.tool()
+@direct_write("terminate_ssh_session")
 def terminate_ssh_session(port: int) -> Any:
     """Terminate a temporary SSH access session by its allocated port."""
     client = get_client()
@@ -502,6 +619,7 @@ def terminate_ssh_session(port: int) -> Any:
 
 
 @mcp.tool()
+@direct_write("create_terminal_session", shell_capable=True)
 def create_terminal_session(
     lab_name: str,
     node_name: str,
@@ -538,6 +656,7 @@ def get_terminal_session(session_id: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("terminate_terminal_session")
 def terminate_terminal_session(session_id: str) -> Any:
     """Terminate an API terminal session by ID."""
     client = get_client()
@@ -548,6 +667,7 @@ def terminate_terminal_session(session_id: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("create_vxlan")
 def create_vxlan(
     link: str,
     remote: str,
@@ -572,6 +692,7 @@ def create_vxlan(
 
 
 @mcp.tool()
+@direct_write("delete_vxlan")
 def delete_vxlan(prefix: str = "vx-") -> Any:
     """Delete VXLAN interfaces matching a prefix after explicit user approval."""
     client = get_client()
@@ -582,6 +703,7 @@ def delete_vxlan(prefix: str = "vx-") -> Any:
 
 
 @mcp.tool()
+@direct_write("set_link_impairment")
 def set_link_impairment(
     lab_name: str,
     node_name: str,
@@ -620,6 +742,7 @@ def show_link_impairments(lab_name: str, node_name: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("reset_link_impairment")
 def reset_link_impairment(
     lab_name: str,
     node_name: str,
@@ -644,6 +767,7 @@ def list_topology_files() -> Any:
 
 
 @mcp.tool()
+@direct_write("update_topology_yaml")
 def update_topology_yaml(lab_name: str, content: str) -> Any:
     """Replace a lab topology YAML document after explicit approval."""
     client = get_client()
@@ -664,6 +788,7 @@ def get_topology_annotations(lab_name: str) -> str:
 
 
 @mcp.tool()
+@direct_write("update_topology_annotations")
 def update_topology_annotations(lab_name: str, content: str) -> Any:
     """Replace the TopoViewer annotations JSON after explicit approval."""
     client = get_client()
@@ -684,6 +809,7 @@ def get_topology_file(lab_name: str, path: str) -> str:
 
 
 @mcp.tool()
+@direct_write("put_topology_file")
 def put_topology_file(lab_name: str, path: str, content: str) -> Any:
     """Write a scoped lab file, including startup configs, after approval."""
     client = get_client()
@@ -694,6 +820,7 @@ def put_topology_file(lab_name: str, path: str, content: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("put_topology_file")
 def put_startup_config(
     lab_name: str,
     node_name: str,
@@ -711,6 +838,7 @@ def put_startup_config(
 
 
 @mcp.tool()
+@direct_write("delete_topology_file")
 def delete_topology_file(lab_name: str, path: str) -> Any:
     """Delete a scoped file from a lab directory after explicit approval."""
     client = get_client()
@@ -721,6 +849,7 @@ def delete_topology_file(lab_name: str, path: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("rename_topology_file")
 def rename_topology_file(
     lab_name: str,
     old_path: str,
@@ -804,6 +933,7 @@ def list_custom_node_templates() -> Any:
 
 
 @mcp.tool()
+@direct_write("save_custom_node_template")
 def save_custom_node_template(template: dict[str, Any]) -> Any:
     """Create or update one custom node template."""
     client = get_client()
@@ -814,6 +944,7 @@ def save_custom_node_template(template: dict[str, Any]) -> Any:
 
 
 @mcp.tool()
+@direct_write("replace_custom_node_templates")
 def replace_custom_node_templates(
     templates: list[dict[str, Any]],
 ) -> Any:
@@ -826,6 +957,7 @@ def replace_custom_node_templates(
 
 
 @mcp.tool()
+@direct_write("set_default_custom_node_template")
 def set_default_custom_node_template(name: str) -> Any:
     """Select the default TopoViewer custom node template."""
     client = get_client()
@@ -836,6 +968,7 @@ def set_default_custom_node_template(name: str) -> Any:
 
 
 @mcp.tool()
+@direct_write("delete_custom_node_template")
 def delete_custom_node_template(name: str) -> Any:
     """Delete one custom node template after explicit approval."""
     client = get_client()

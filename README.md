@@ -8,7 +8,8 @@
 
 Community MCP server for managing Containerlab environments through the official
 Containerlab API Server. It lets MCP-capable AI clients inspect, deploy, start,
-stop, and destroy labs without exposing unrestricted shell access.
+stop, and destroy labs without exposing the Containerlab host shell. Raw command
+execution inside node containers is disabled by default.
 
 > [!WARNING]
 >
@@ -21,7 +22,7 @@ stop, and destroy labs without exposing unrestricted shell access.
 ## Overview
 
 `containerlab-mcp-server` wraps the official Containerlab HTTPS API and exposes
-74 focused MCP tools for lab lifecycle, command execution, configuration
+78 focused MCP tools for lab lifecycle, approved command execution, configuration
 artifacts, packet capture, network impairments, topology generation, remote
 access, and multi-host network stitching. Once configured, an AI assistant can
 answer requests such as:
@@ -40,6 +41,22 @@ answer requests such as:
 The MCP server runs locally with the AI client. It authenticates to
 `clab-api-server`, caches the returned bearer token for up to one hour, and
 re-authenticates once when an API request returns HTTP 401.
+
+Safe mode is enabled by default. Read and preview tools execute directly, while
+state-changing actions use explicit, durable workflow handles:
+
+```text
+create_change_plan(...) -> plan_id
+approve_change(plan_id, confirmation="approve") -> approval_id
+execute_approved_change(plan_id, approval_id, idempotency_key) -> result
+```
+
+Plans, approvals, and execution outcomes are stored in a private SQLite database.
+Executed idempotency keys cannot run the same operation twice. API calls emit
+redacted JSON audit records with correlation IDs, outcomes, latency, and response
+size. Safe mode also rejects path traversal, oversized content, invalid network
+parameters, and dangerous topology keys such as `binds`, `exec`, `privileged`,
+and `network-mode`.
 
 ## Implemented API Server Features
 
@@ -76,9 +93,19 @@ These API server capabilities are currently exposed through MCP:
 
 Destructive or state-changing actions such as `destroy_lab`, `delete_image`,
 `execute_node_command`, `set_link_impairment`, file writes/deletes, and template
-replacement should only be called after explicit operator approval.
+replacement are blocked from direct execution in safe mode. Use the approval
+workflow above after reviewing the generated action and arguments.
 
 ## Tool Categories
+
+### Change Control
+
+| Tool | Description |
+| --- | --- |
+| `list_change_actions` | List approved workflow actions and their risk levels |
+| `create_change_plan` | Validate and store a proposed change without executing it |
+| `approve_change` | Record explicit approval for one unexpired plan |
+| `execute_approved_change` | Execute an approved plan with an idempotency key |
 
 ### Health and Inventory
 
@@ -790,12 +817,18 @@ Edit `.env` with your API server details:
 CLAB_API_URL=https://containerlab-host.example:8090
 CLAB_USERNAME=your-username
 CLAB_PASSWORD=your-password
-CLAB_VERIFY_TLS=false
+CLAB_VERIFY_TLS=true
 CLAB_TIMEOUT=60
+CLAB_SAFE_MODE=true
+CLAB_ALLOW_RAW_COMMANDS=false
+CLAB_ALLOW_SHELL_TERMINAL=false
+CLAB_MAX_RESPONSE_BYTES=1000000
+CLAB_APPROVAL_TTL=900
 ```
 
-Do not commit `.env`. Set `CLAB_VERIFY_TLS=true` when the API server uses a
-certificate trusted by the MCP client host.
+Do not commit `.env`. TLS verification is enabled by default. For a private lab
+using a self-signed certificate, install its CA certificate on the MCP client
+host instead of disabling verification where possible.
 
 ## Run Locally
 
@@ -825,8 +858,9 @@ startup_timeout_sec = 30
 CLAB_API_URL = "https://containerlab-host.example:8090"
 CLAB_USERNAME = "your-username"
 CLAB_PASSWORD = "your-password"
-CLAB_VERIFY_TLS = "false"
+CLAB_VERIFY_TLS = "true"
 CLAB_TIMEOUT = "60"
+CLAB_SAFE_MODE = "true"
 ```
 
 Restart Codex after editing the configuration.
@@ -867,8 +901,9 @@ credentials in `~/.hermes/.env`:
 CLAB_API_URL=https://containerlab-host.example:8090
 CLAB_USERNAME=your-username
 CLAB_PASSWORD=your-password
-CLAB_VERIFY_TLS=false
+CLAB_VERIFY_TLS=true
 CLAB_TIMEOUT=60
+CLAB_SAFE_MODE=true
 ```
 
 Protect the credentials file:
@@ -940,7 +975,8 @@ Add this server entry to the Claude Desktop MCP configuration:
         "CLAB_API_URL": "https://containerlab-host.example:8090",
         "CLAB_USERNAME": "your-username",
         "CLAB_PASSWORD": "your-password",
-        "CLAB_VERIFY_TLS": "false",
+        "CLAB_VERIFY_TLS": "true",
+        "CLAB_SAFE_MODE": "true",
         "CLAB_TIMEOUT": "60"
       }
     }
@@ -963,7 +999,8 @@ claude mcp add-json containerlab '{
     "CLAB_API_URL": "https://containerlab-host.example:8090",
     "CLAB_USERNAME": "your-username",
     "CLAB_PASSWORD": "your-password",
-    "CLAB_VERIFY_TLS": "false",
+    "CLAB_VERIFY_TLS": "true",
+    "CLAB_SAFE_MODE": "true",
     "CLAB_TIMEOUT": "60"
   }
 }'
@@ -989,7 +1026,8 @@ VS Code stores MCP configuration in `.vscode/mcp.json` or the user profile:
         "CLAB_API_URL": "https://containerlab-host.example:8090",
         "CLAB_USERNAME": "your-username",
         "CLAB_PASSWORD": "your-password",
-        "CLAB_VERIFY_TLS": "false",
+        "CLAB_VERIFY_TLS": "true",
+        "CLAB_SAFE_MODE": "true",
         "CLAB_TIMEOUT": "60"
       }
     }
@@ -1022,10 +1060,22 @@ configuration.
 - `stop_lab` preserves the deployed lab and dataplane links; `destroy_lab`
   removes the deployment.
 - `delete_image`, `destroy_lab`, and `delete_vxlan` are destructive operations.
+- Safe mode is enabled by default and blocks direct state-changing tool calls.
+  Use `list_change_actions`, `create_change_plan`, `approve_change`, and
+  `execute_approved_change` for controlled execution.
+- `CLAB_SAFE_MODE=false` restores direct write calls for isolated personal labs.
+  This bypasses the durable approval workflow and is not recommended for shared
+  environments.
+- Raw node-container commands additionally require
+  `CLAB_ALLOW_RAW_COMMANDS=true`. Interactive `shell` terminal sessions require
+  `CLAB_ALLOW_SHELL_TERMINAL=true`.
+- The default approval database and audit log are stored under
+  `~/.local/state/containerlab-mcp/` with owner-only permissions. Override them
+  with `CLAB_APPROVAL_DB` and `CLAB_AUDIT_LOG`.
 - Listing all users' SSH sessions and managing VXLAN tunnels may require an API
   superuser.
 - Self-signed API certificates are common in labs. Prefer a trusted certificate
-  where possible instead of leaving TLS verification disabled.
+  or install the private CA instead of disabling TLS verification.
 - This project is intended for lab, demo, validation, and operational-assist
   workflows. Apply appropriate review and change control before adapting it for
   shared environments.
@@ -1035,5 +1085,7 @@ configuration.
 - [Containerlab API Server](https://containerlab.dev/manual/api-server/)
 - [Containerlab documentation](https://containerlab.dev/)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
+- [Security policy](docs/SECURITY.md)
+- [Operations runbook](docs/RUNBOOK.md)
 - [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp)
 - [VS Code MCP configuration reference](https://code.visualstudio.com/docs/copilot/reference/mcp-configuration)

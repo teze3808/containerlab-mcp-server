@@ -1,13 +1,26 @@
 from __future__ import annotations
 
 import json as json_module
+import re
+import threading
 import time
 from typing import Any
 from urllib.parse import quote
+from uuid import uuid4
 
 import httpx
 
+from .audit import AuditLogger
 from .config import Settings
+from .safety import (
+    validate_content,
+    validate_identifier,
+    validate_image_reference,
+    validate_netem,
+    validate_relative_path,
+    validate_topology,
+    validate_vxlan,
+)
 
 
 class ContainerlabApiError(RuntimeError):
@@ -15,6 +28,9 @@ class ContainerlabApiError(RuntimeError):
 
 
 class ContainerlabClient:
+    _token_cache: dict[tuple[str, str], tuple[str, float]] = {}
+    _token_lock = threading.Lock()
+
     def __init__(self, settings: Settings):
         self.settings = settings
         self._token: str | None = None
@@ -24,13 +40,19 @@ class ContainerlabClient:
             verify=settings.verify_tls,
             timeout=settings.timeout,
         )
+        self._audit = AuditLogger(settings.audit_log, settings.username)
 
     def close(self) -> None:
         self._client.close()
 
     def login(self, force: bool = False) -> str:
-        if self._token and not force and time.time() - self._token_time < 3600:
-            return self._token
+        cache_key = (self.settings.api_url, self.settings.username)
+        if not force:
+            with self._token_lock:
+                cached = self._token_cache.get(cache_key)
+            if cached and time.time() - cached[1] < 3600:
+                self._token, self._token_time = cached
+                return cached[0]
 
         response = self._client.post(
             "/login",
@@ -43,6 +65,8 @@ class ContainerlabClient:
         token = response.json()["token"]
         self._token = token
         self._token_time = time.time()
+        with self._token_lock:
+            self._token_cache[cache_key] = (token, self._token_time)
         return token
 
     def request(
@@ -55,23 +79,22 @@ class ContainerlabClient:
         content: str | bytes | None = None,
         headers: dict[str, str] | None = None,
         retry_auth: bool = True,
+        idempotency_key: str | None = None,
     ) -> Any:
+        correlation_id = str(uuid4())
         token = self.login()
         request_headers = {
             **(headers or {}),
             "Authorization": f"Bearer {token}",
+            "X-Correlation-ID": correlation_id,
         }
-        response = self._client.request(
-            method,
-            path,
-            params=params,
-            json=json,
-            content=content,
-            headers=request_headers,
+        if idempotency_key:
+            request_headers["X-Idempotency-Key"] = idempotency_key
+        started = time.monotonic()
+        retry_allowed = method.upper() in {"GET", "HEAD", "OPTIONS"} or bool(
+            idempotency_key
         )
-        if response.status_code == 401 and retry_auth:
-            token = self.login(force=True)
-            request_headers["Authorization"] = f"Bearer {token}"
+        try:
             response = self._client.request(
                 method,
                 path,
@@ -80,9 +103,50 @@ class ContainerlabClient:
                 content=content,
                 headers=request_headers,
             )
+            if response.status_code == 401 and retry_auth and retry_allowed:
+                token = self.login(force=True)
+                request_headers["Authorization"] = f"Bearer {token}"
+                response = self._client.request(
+                    method,
+                    path,
+                    params=params,
+                    json=json,
+                    content=content,
+                    headers=request_headers,
+                )
 
-        self._raise_for_status(response)
-        return self._decode_response(response)
+            self._raise_for_status(response)
+            result = self._decode_response(
+                response,
+                max_bytes=self.settings.max_response_bytes,
+            )
+        except Exception as exc:
+            self._audit.write(
+                {
+                    "correlation_id": correlation_id,
+                    "downstream_system": "clab-api-server",
+                    "method": method.upper(),
+                    "path": path,
+                    "outcome": "error",
+                    "error_code": type(exc).__name__,
+                    "latency_ms": round((time.monotonic() - started) * 1000, 3),
+                }
+            )
+            raise
+
+        self._audit.write(
+            {
+                "correlation_id": correlation_id,
+                "downstream_system": "clab-api-server",
+                "method": method.upper(),
+                "path": path,
+                "outcome": "success",
+                "status_code": response.status_code,
+                "latency_ms": round((time.monotonic() - started) * 1000, 3),
+                "response_size": len(response.content),
+            }
+        )
+        return result
 
     def get_root(self) -> Any:
         response = self._client.get("/")
@@ -105,7 +169,7 @@ class ContainerlabClient:
         return self.request("GET", "/api/v1/labs")
 
     def inspect_lab(self, lab_name: str) -> list[dict[str, Any]]:
-        return self.request("GET", f"/api/v1/labs/{lab_name}")
+        return self.request("GET", f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}")
 
     def list_lab_interfaces(
         self,
@@ -115,25 +179,28 @@ class ContainerlabClient:
         params = {"node": node_name} if node_name else None
         return self.request(
             "GET",
-            f"/api/v1/labs/{lab_name}/interfaces",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/interfaces",
             params=params,
         )
 
     def get_topology_yaml(self, lab_name: str) -> str:
-        return self.request("GET", f"/api/v1/labs/{lab_name}/topology/yaml")
+        lab = self._segment(lab_name, "lab_name")
+        return self.request("GET", f"/api/v1/labs/{lab}/topology/yaml")
 
     def get_node_logs(self, lab_name: str, node_name: str) -> Any:
         container_name = self.resolve_container_name(lab_name, node_name)
         return self.request(
             "GET",
-            f"/api/v1/labs/{lab_name}/nodes/{container_name}/logs",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/nodes/"
+            f"{self._segment(container_name, 'node_name')}/logs",
         )
 
     def get_node_browser_ports(self, lab_name: str, node_name: str) -> Any:
         container_name = self.resolve_container_name(lab_name, node_name)
         return self.request(
             "GET",
-            f"/api/v1/labs/{lab_name}/nodes/{container_name}/browser-ports",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/nodes/"
+            f"{self._segment(container_name, 'node_name')}/browser-ports",
         )
 
     def execute_lab_command(
@@ -154,7 +221,7 @@ class ContainerlabClient:
         )
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/exec",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/exec",
             params=params,
             json={"command": command},
         )
@@ -208,21 +275,21 @@ class ContainerlabClient:
         )
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/save",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/save",
             params=params,
         )
 
     def start_lab(self, lab_name: str, include_logs: bool = True) -> Any:
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/start",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/start",
             params={"includeLogs": include_logs},
         )
 
     def stop_lab(self, lab_name: str, include_logs: bool = True) -> Any:
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/stop",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/stop",
             params={"includeLogs": include_logs},
         )
 
@@ -253,8 +320,9 @@ class ContainerlabClient:
             "includeLogs": include_logs,
         }
         if topology_path:
-            params["path"] = topology_path
-        return self.request("POST", f"/api/v1/labs/{lab_name}/deploy", params=params)
+            params["path"] = validate_relative_path(topology_path, "topology_path")
+        lab = self._segment(lab_name, "lab_name")
+        return self.request("POST", f"/api/v1/labs/{lab}/deploy", params=params)
 
     def deploy_topology_content(
         self,
@@ -262,9 +330,14 @@ class ContainerlabClient:
         lab_name_override: str | None = None,
         reconfigure: bool = False,
     ) -> Any:
+        if self.settings.safe_mode:
+            validate_topology(topology)
         params: dict[str, Any] = {"reconfigure": reconfigure}
         if lab_name_override:
-            params["labNameOverride"] = lab_name_override
+            params["labNameOverride"] = validate_identifier(
+                lab_name_override,
+                "lab_name_override",
+            )
         return self.request(
             "POST",
             "/api/v1/labs",
@@ -284,12 +357,14 @@ class ContainerlabClient:
             "graceful": graceful,
             "includeLogs": include_logs,
         }
-        return self.request("DELETE", f"/api/v1/labs/{lab_name}", params=params)
+        lab = self._segment(lab_name, "lab_name")
+        return self.request("DELETE", f"/api/v1/labs/{lab}", params=params)
 
     def list_images(self) -> Any:
         return self.request("GET", "/api/v1/images")
 
     def pull_image(self, image: str) -> Any:
+        image = validate_image_reference(image)
         return self.request(
             "POST",
             "/api/v1/images/pull",
@@ -297,6 +372,7 @@ class ContainerlabClient:
         )
 
     def delete_image(self, reference: str, force: bool = False) -> Any:
+        reference = validate_image_reference(reference)
         return self.request(
             "DELETE",
             "/api/v1/images",
@@ -316,7 +392,7 @@ class ContainerlabClient:
         }
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/graph/drawio",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/graph/drawio",
             json=payload,
         )
 
@@ -342,7 +418,7 @@ class ContainerlabClient:
             payload["remoteHostname"] = remote_hostname
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/capture/packetflix",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/capture/packetflix",
             json=payload,
         )
 
@@ -359,7 +435,7 @@ class ContainerlabClient:
             payload["theme"] = theme
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/capture/wireshark-vnc-sessions",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/capture/wireshark-vnc-sessions",
             json=payload,
         )
 
@@ -399,7 +475,8 @@ class ContainerlabClient:
         }
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/nodes/{container_name}/ssh",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/nodes/"
+            f"{self._segment(container_name, 'node_name')}/ssh",
             json=payload,
         )
 
@@ -435,7 +512,8 @@ class ContainerlabClient:
             payload["telnetPort"] = telnet_port
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/nodes/{container_name}/terminal-sessions",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/nodes/"
+            f"{self._segment(container_name, 'node_name')}/terminal-sessions",
             json=payload,
         )
 
@@ -454,6 +532,14 @@ class ContainerlabClient:
         mtu: int | None = None,
         dev: str | None = None,
     ) -> Any:
+        validate_vxlan(
+            link=link,
+            remote=remote,
+            vni=vni,
+            port=port,
+            mtu=mtu,
+            dev=dev,
+        )
         payload: dict[str, Any] = {
             "link": link,
             "remote": remote,
@@ -484,6 +570,14 @@ class ContainerlabClient:
         rate: int = 0,
         corruption: float = 0.0,
     ) -> Any:
+        validate_netem(
+            interface=interface,
+            delay=delay,
+            jitter=jitter,
+            loss=loss,
+            rate=rate,
+            corruption=corruption,
+        )
         payload: dict[str, Any] = {
             "containerName": self.resolve_container_name(lab_name, node_name),
             "interface": interface,
@@ -525,41 +619,47 @@ class ContainerlabClient:
         return self.request("GET", "/api/v1/labs/topology/files")
 
     def update_topology_yaml(self, lab_name: str, content: str) -> Any:
+        validate_content(content, max_bytes=self.settings.max_response_bytes)
         return self._put_text(
-            f"/api/v1/labs/{lab_name}/topology/yaml",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/topology/yaml",
             content,
         )
 
     def get_topology_annotations(self, lab_name: str) -> str:
         return self.request(
             "GET",
-            f"/api/v1/labs/{lab_name}/topology/annotations",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/topology/annotations",
         )
 
     def update_topology_annotations(self, lab_name: str, content: str) -> Any:
+        validate_content(content, max_bytes=self.settings.max_response_bytes)
         return self._put_text(
-            f"/api/v1/labs/{lab_name}/topology/annotations",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/topology/annotations",
             content,
         )
 
     def get_topology_file(self, lab_name: str, path: str) -> str:
+        path = validate_relative_path(path)
         return self.request(
             "GET",
-            f"/api/v1/labs/{lab_name}/topology/file",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/topology/file",
             params={"path": path},
         )
 
     def put_topology_file(self, lab_name: str, path: str, content: str) -> Any:
+        path = validate_relative_path(path)
+        validate_content(content, max_bytes=self.settings.max_response_bytes)
         return self._put_text(
-            f"/api/v1/labs/{lab_name}/topology/file",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/topology/file",
             content,
             params={"path": path},
         )
 
     def delete_topology_file(self, lab_name: str, path: str) -> Any:
+        path = validate_relative_path(path)
         return self.request(
             "DELETE",
-            f"/api/v1/labs/{lab_name}/topology/file",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/topology/file",
             params={"path": path},
         )
 
@@ -569,9 +669,11 @@ class ContainerlabClient:
         old_path: str,
         new_path: str,
     ) -> Any:
+        old_path = validate_relative_path(old_path, "old_path")
+        new_path = validate_relative_path(new_path, "new_path")
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/topology/file/rename",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/topology/file/rename",
             json={"oldPath": old_path, "newPath": new_path},
         )
 
@@ -739,10 +841,13 @@ class ContainerlabClient:
         container_name = self.resolve_container_name(lab_name, node_name)
         return self.request(
             "POST",
-            f"/api/v1/labs/{lab_name}/nodes/{container_name}/{action}",
+            f"/api/v1/labs/{self._segment(lab_name, 'lab_name')}/nodes/"
+            f"{self._segment(container_name, 'node_name')}/{action}",
         )
 
     def resolve_container_name(self, lab_name: str, node_name: str) -> str:
+        validate_identifier(lab_name, "lab_name")
+        validate_identifier(node_name, "node_name")
         if node_name.startswith("clab-"):
             return node_name
 
@@ -763,7 +868,18 @@ class ContainerlabClient:
         )
 
     @staticmethod
-    def _decode_response(response: httpx.Response) -> Any:
+    def _segment(value: str, field: str) -> str:
+        return quote(validate_identifier(value, field), safe="")
+
+    @staticmethod
+    def _decode_response(
+        response: httpx.Response,
+        max_bytes: int = 1_000_000,
+    ) -> Any:
+        if len(response.content) > max_bytes:
+            raise ContainerlabApiError(
+                f"Containerlab API response exceeded {max_bytes} bytes"
+            )
         content_type = response.headers.get("content-type", "")
         if "application/json" in content_type:
             return response.json()
@@ -777,7 +893,19 @@ class ContainerlabClient:
             detail = response.json().get("error", response.text)
         except Exception:
             detail = response.text
+        detail = ContainerlabClient._redact(str(detail))[:4096]
         raise ContainerlabApiError(
             f"Containerlab API {response.request.method} {response.request.url} "
             f"returned HTTP {response.status_code}: {detail}"
         )
+
+    @staticmethod
+    def _redact(value: str) -> str:
+        patterns = (
+            r"(?i)(authorization\s*[:=]\s*)([^\s,;]+)",
+            r"(?i)((?:password|token|secret)\s*[:=]\s*)([^\s,;]+)",
+            r"(?i)(bearer\s+)([A-Za-z0-9._~+/-]+=*)",
+        )
+        for pattern in patterns:
+            value = re.sub(pattern, r"\1[REDACTED]", value)
+        return value
